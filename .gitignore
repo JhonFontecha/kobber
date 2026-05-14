@@ -1,0 +1,27 @@
+# Frontend
+node_modules/
+dist/
+
+# Backend — credenciales y datos locales
+backend/.env
+backend/__pycache__/
+backend/routes/__pycache__/
+backend/*.pyc
+backend/storage/products.db
+backend/storage/images/
+backend/storage/exports/
+
+# Python virtualenv
+venv/
+.venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+
+# Claude Code (configuración local)
+.claude/
