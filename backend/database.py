@@ -1,50 +1,12 @@
-import sqlite3
-import json
-from contextlib import contextmanager
-from config import DB_PATH, init_storage
+from supabase import create_client, Client
+from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY
 
-def init_db():
-    init_storage()
-    with get_conn() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS products (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre              TEXT    NOT NULL,
-                sku                 TEXT,
-                descripcion         TEXT,
-                variantes           TEXT    DEFAULT '[]',
-                precio_distribuidor REAL,
-                precio_mc           REAL,
-                unidades_caja       INTEGER,
-                categoria           TEXT,
-                margen              REAL    DEFAULT 0,
-                imagenes            TEXT    DEFAULT '[]',
-                pagina_catalogo     INTEGER,
-                estado              TEXT    DEFAULT 'pendiente',
-                created_at          TEXT    DEFAULT (datetime('now')),
-                updated_at          TEXT    DEFAULT (datetime('now'))
-            );
-        """)
+_client: Client | None = None
 
-@contextmanager
-def get_conn():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-def row_to_dict(row):
-    d = dict(row)
-    for field in ("variantes", "imagenes"):
-        if isinstance(d.get(field), str):
-            try:
-                d[field] = json.loads(d[field])
-            except (json.JSONDecodeError, TypeError):
-                d[field] = []
-    return d
+def get_client() -> Client:
+    global _client
+    if _client is None:
+        # service_role key bypasses RLS — required for backend operations
+        key = SUPABASE_SERVICE_KEY or SUPABASE_KEY
+        _client = create_client(SUPABASE_URL, key)
+    return _client

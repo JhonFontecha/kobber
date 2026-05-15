@@ -1,176 +1,149 @@
-import json
 from typing import Optional
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from database import get_conn, row_to_dict
+from database import get_client
 
 router = APIRouter()
 
 
-class ProductCreate(BaseModel):
-    nombre: str
-    sku: Optional[str] = None
-    descripcion: Optional[str] = None
-    variantes: Optional[list] = []
-    precio_distribuidor: Optional[float] = None
-    precio_mc: Optional[float] = None
-    unidades_caja: Optional[int] = None
-    categoria: Optional[str] = None
-    margen: Optional[float] = 0
-    imagenes: Optional[list] = []
-    pagina_catalogo: Optional[int] = None
-    estado: Optional[str] = "pendiente"
-
+# ── Modelos ───────────────────────────────────────────────────────────────────
 
 class ProductUpdate(BaseModel):
-    nombre: Optional[str] = None
-    sku: Optional[str] = None
-    descripcion: Optional[str] = None
-    variantes: Optional[list] = None
+    nombre:          Optional[str]       = None
+    descripcion:     Optional[str]       = None
+    marca:           Optional[str]       = None
+    categoria:       Optional[str]       = None
+    subcategoria:    Optional[str]       = None
+    seccion:         Optional[str]       = None
+    caracteristicas: Optional[list[str]] = None
+    estado:          Optional[str]       = None
+
+
+class VariantCreate(BaseModel):
+    codigo:              Optional[str]   = None
+    clave:               Optional[str]   = None
+    descripcion:         Optional[str]   = None
     precio_distribuidor: Optional[float] = None
-    precio_mc: Optional[float] = None
-    unidades_caja: Optional[int] = None
-    categoria: Optional[str] = None
-    margen: Optional[float] = None
-    imagenes: Optional[list] = None
-    estado: Optional[str] = None
+    nc:                  Optional[int]   = None
+    unidades_caja:       Optional[int]   = None
+    unidades_master:     Optional[int]   = None
+    stock:               Optional[int]   = 0
+    estado:              Optional[str]   = "activo"
 
 
-class BulkSave(BaseModel):
-    productos: list[ProductCreate]
+class VariantUpdate(BaseModel):
+    codigo:              Optional[str]   = None
+    clave:               Optional[str]   = None
+    descripcion:         Optional[str]   = None
+    precio_distribuidor: Optional[float] = None
+    nc:                  Optional[int]   = None
+    unidades_caja:       Optional[int]   = None
+    unidades_master:     Optional[int]   = None
+    stock:               Optional[int]   = None
+    estado:              Optional[str]   = None
+
+
+# ── Productos ─────────────────────────────────────────────────────────────────
+
+@router.get("/stats")
+def get_stats():
+    db = get_client()
+    products = db.table("products").select("estado, categoria").execute().data
+    total = len(products)
+
+    by_estado: dict = {}
+    by_cat: dict = {}
+    for p in products:
+        e = p.get("estado") or "pendiente"
+        by_estado[e] = by_estado.get(e, 0) + 1
+        c = p.get("categoria") or "Sin categoría"
+        by_cat[c] = by_cat.get(c, 0) + 1
+
+    top_cat = sorted(by_cat.items(), key=lambda x: x[1], reverse=True)[:10]
+    return {
+        "total": total,
+        "por_estado": by_estado,
+        "por_categoria": [{"categoria": k, "cantidad": v} for k, v in top_cat],
+    }
 
 
 @router.get("/")
 def list_products(estado: Optional[str] = None, categoria: Optional[str] = None):
-    with get_conn() as conn:
-        query = "SELECT * FROM products WHERE 1=1"
-        params = []
-        if estado:
-            query += " AND estado = ?"
-            params.append(estado)
-        if categoria:
-            query += " AND categoria = ?"
-            params.append(categoria)
-        query += " ORDER BY created_at DESC"
-        rows = conn.execute(query, params).fetchall()
-    return [row_to_dict(r) for r in rows]
-
-
-@router.get("/stats")
-def get_stats():
-    with get_conn() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
-        by_estado = conn.execute(
-            "SELECT estado, COUNT(*) as cnt FROM products GROUP BY estado"
-        ).fetchall()
-        by_cat = conn.execute(
-            "SELECT categoria, COUNT(*) as cnt FROM products GROUP BY categoria ORDER BY cnt DESC LIMIT 10"
-        ).fetchall()
-    return {
-        "total": total,
-        "por_estado": {r["estado"]: r["cnt"] for r in by_estado},
-        "por_categoria": [{"categoria": r["categoria"], "cantidad": r["cnt"]} for r in by_cat],
-    }
+    db = get_client()
+    query = db.table("products").select(
+        "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, stock, estado), "
+        "product_images(id, url, orden)"
+    )
+    if estado:
+        query = query.eq("estado", estado)
+    if categoria:
+        query = query.eq("categoria", categoria)
+    result = query.order("created_at", desc=True).execute()
+    return result.data
 
 
 @router.get("/{product_id}")
-def get_product(product_id: int):
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-    if not row:
+def get_product(product_id: str):
+    db = get_client()
+    result = db.table("products").select(
+        "*, product_variants(*, product_attributes(nombre, valor, unidad)), "
+        "product_attributes(id, variant_id, nombre, valor, unidad), "
+        "product_images(id, url, orden, fuente)"
+    ).eq("id", product_id).single().execute()
+
+    if not result.data:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
-    return row_to_dict(row)
-
-
-@router.post("/")
-def create_product(product: ProductCreate):
-    with get_conn() as conn:
-        cur = conn.execute(
-            """INSERT INTO products
-               (nombre, sku, descripcion, variantes, precio_distribuidor, precio_mc,
-                unidades_caja, categoria, margen, imagenes, pagina_catalogo, estado)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                product.nombre,
-                product.sku,
-                product.descripcion,
-                json.dumps(product.variantes or []),
-                product.precio_distribuidor,
-                product.precio_mc,
-                product.unidades_caja,
-                product.categoria,
-                product.margen or 0,
-                json.dumps(product.imagenes or []),
-                product.pagina_catalogo,
-                product.estado or "pendiente",
-            ),
-        )
-        product_id = cur.lastrowid
-        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-    return row_to_dict(row)
-
-
-@router.post("/bulk")
-def bulk_save(body: BulkSave):
-    saved = []
-    with get_conn() as conn:
-        for p in body.productos:
-            cur = conn.execute(
-                """INSERT INTO products
-                   (nombre, sku, descripcion, variantes, precio_distribuidor, precio_mc,
-                    unidades_caja, categoria, margen, imagenes, pagina_catalogo, estado)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    p.nombre,
-                    p.sku,
-                    p.descripcion,
-                    json.dumps(p.variantes or []),
-                    p.precio_distribuidor,
-                    p.precio_mc,
-                    p.unidades_caja,
-                    p.categoria,
-                    p.margen or 0,
-                    json.dumps(p.imagenes or []),
-                    p.pagina_catalogo,
-                    p.estado or "pendiente",
-                ),
-            )
-            saved.append(cur.lastrowid)
-    return {"guardados": len(saved), "ids": saved}
+    return result.data
 
 
 @router.patch("/{product_id}")
-def update_product(product_id: int, product: ProductUpdate):
-    fields = product.model_dump(exclude_none=True)
+def update_product(product_id: str, body: ProductUpdate):
+    fields = body.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status_code=400, detail="Nada que actualizar")
 
-    for key in ("variantes", "imagenes"):
-        if key in fields and isinstance(fields[key], list):
-            fields[key] = json.dumps(fields[key])
-
-    fields["updated_at"] = "datetime('now')"
-    set_clause = ", ".join(
-        f"{k} = datetime('now')" if v == "datetime('now')" else f"{k} = ?"
-        for k, v in fields.items()
-    )
-    values = [v for v in fields.values() if v != "datetime('now')"]
-    values.append(product_id)
-
-    with get_conn() as conn:
-        conn.execute(
-            f"UPDATE products SET {set_clause} WHERE id = ?", values
-        )
-        row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-    if not row:
+    db = get_client()
+    result = db.table("products").update(fields).eq("id", product_id).execute()
+    if not result.data:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
-    return row_to_dict(row)
+    return result.data[0]
 
 
 @router.delete("/{product_id}")
-def delete_product(product_id: int):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+def delete_product(product_id: str):
+    db = get_client()
+    db.table("products").delete().eq("id", product_id).execute()
+    return {"ok": True}
+
+
+# ── Variantes ─────────────────────────────────────────────────────────────────
+
+@router.post("/{product_id}/variants")
+def add_variant(product_id: str, body: VariantCreate):
+    db = get_client()
+    result = db.table("product_variants").insert({
+        "product_id": product_id,
+        **body.model_dump(exclude_none=True),
+    }).execute()
+    return result.data[0]
+
+
+@router.patch("/variants/{variant_id}")
+def update_variant(variant_id: str, body: VariantUpdate):
+    fields = body.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nada que actualizar")
+
+    db = get_client()
+    result = db.table("product_variants").update(fields).eq("id", variant_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Variante no encontrada")
+    return result.data[0]
+
+
+@router.delete("/variants/{variant_id}")
+def delete_variant(variant_id: str):
+    db = get_client()
+    db.table("product_variants").delete().eq("id", variant_id).execute()
     return {"ok": True}

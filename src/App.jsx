@@ -100,43 +100,138 @@ function Toast({ msg, onClose }) {
   )
 }
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 
-function Tabs({ active, onChange, stats }) {
-  const tabs = [
-    { id: 'productos', label: 'Productos', count: stats?.total },
-    { id: 'importar',  label: 'Importar PDF' },
-    { id: 'exportar',  label: 'Exportar Excel' },
-  ]
+const NAV_ITEMS = [
+  { id: 'productos', label: 'Productos',      icon: '≡' },
+  { id: 'importar',  label: 'Importar PDF',   icon: '↑' },
+  { id: 'exportar',  label: 'Exportar Excel', icon: '↓' },
+]
+
+function Sidebar({ active, onChange, stats, open, onToggle }) {
   return (
-    <div style={{ display: 'flex', gap: '4px', marginBottom: '20px' }}>
-      {tabs.map(t => (
-        <button
-          key={t.id}
-          onClick={() => onChange(t.id)}
-          style={{
-            padding: '7px 14px', borderRadius: 'var(--radius-md)', border: 'none',
-            fontSize: '12px', fontWeight: '500', cursor: 'pointer',
-            background: active === t.id ? 'var(--accent)' : 'var(--surface)',
-            color: active === t.id ? '#131211' : 'var(--text-secondary)',
-            border: active === t.id ? 'none' : '0.5px solid var(--border)',
-          }}
-        >
-          {t.label}
-          {t.count != null && (
-            <span style={{ marginLeft: 6, opacity: 0.7 }}>({t.count})</span>
-          )}
-        </button>
-      ))}
+    <div style={{
+      width: open ? 220 : 48,
+      minWidth: open ? 220 : 48,
+      borderLeft: '0.5px solid var(--border)',
+      background: 'var(--surface)',
+      transition: 'width 0.25s ease, min-width 0.25s ease',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      flexShrink: 0,
+      position: 'sticky',
+      top: 0,
+      height: '100vh',
+    }}>
+
+      {/* Toggle */}
+      <button
+        onClick={onToggle}
+        title={open ? 'Cerrar menú' : 'Abrir menú'}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          padding: '14px', color: 'var(--text-tertiary)',
+          fontSize: '18px', lineHeight: 1,
+          display: 'flex', justifyContent: open ? 'flex-end' : 'center', alignItems: 'center',
+          borderBottom: '0.5px solid var(--border)',
+          transition: 'color 0.15s',
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-tertiary)'}
+      >
+        {open ? '›' : '‹'}
+      </button>
+
+      {/* Logo */}
+      <div style={{
+        padding: open ? '18px 16px 10px' : '18px 0 10px',
+        display: 'flex', justifyContent: open ? 'flex-start' : 'center', alignItems: 'center',
+        gap: 10, borderBottom: '0.5px solid var(--border)',
+        overflow: 'hidden',
+      }}>
+        <img src={logo} alt="Kobber" style={{ width: 30, height: 30, borderRadius: 7, objectFit: 'cover', flexShrink: 0 }} />
+        {open && (
+          <div style={{ overflow: 'hidden' }}>
+            <p style={{ fontSize: '14px', fontWeight: '600', whiteSpace: 'nowrap', margin: 0 }}>Kobber</p>
+            <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', margin: 0 }}>catálogo ML</p>
+          </div>
+        )}
+      </div>
+
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: '8px 0' }}>
+        {NAV_ITEMS.map(item => {
+          const isActive = active === item.id
+          const count = item.id === 'productos' ? stats?.total : undefined
+          return (
+            <button
+              key={item.id}
+              onClick={() => onChange(item.id)}
+              title={open ? undefined : item.label}
+              style={{
+                width: '100%', background: isActive ? 'var(--bg)' : 'transparent',
+                border: 'none', borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                cursor: 'pointer',
+                padding: open ? '10px 16px' : '12px 0',
+                display: 'flex', alignItems: 'center',
+                gap: open ? 10 : 0, justifyContent: open ? 'flex-start' : 'center',
+                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+                fontSize: '13px', fontWeight: isActive ? '500' : '400',
+                transition: 'color 0.15s, background 0.15s',
+              }}
+            >
+              <span style={{ fontSize: '17px', lineHeight: 1, flexShrink: 0 }}>{item.icon}</span>
+              {open && (
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {item.label}
+                  {count != null && (
+                    <span style={{ marginLeft: 5, fontSize: '11px', opacity: 0.55 }}>({count})</span>
+                  )}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </nav>
     </div>
   )
 }
 
 // ── Import PDF tab ─────────────────────────────────────────────────────────────
 
+function ProgressBar({ current, total, found }) {
+  const pct = total ? Math.round((current / total) * 100) : 0
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+          Página {current} de {total}
+        </span>
+        <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: '500' }}>
+          {found} producto{found !== 1 ? 's' : ''} encontrado{found !== 1 ? 's' : ''}
+        </span>
+      </div>
+      <div style={{
+        height: 6, background: 'var(--bg)', borderRadius: 3,
+        overflow: 'hidden', border: '0.5px solid var(--border)',
+      }}>
+        <div style={{
+          height: '100%', width: `${pct}%`, background: 'var(--accent)',
+          borderRadius: 3, transition: 'width 0.4s ease',
+        }} />
+      </div>
+      <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 5 }}>
+        {pct}% — Claude está analizando cada página...
+      </p>
+    </div>
+  )
+}
+
 function ImportTab({ onImported, onToast }) {
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(null)   // { current, total, found }
   const [result, setResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [editIdx, setEditIdx] = useState(null)
@@ -144,25 +239,59 @@ function ImportTab({ onImported, onToast }) {
 
   const handleFile = (e) => {
     const f = e.target.files?.[0]
-    if (f) { setFile(f); setResult(null) }
+    if (f) { setFile(f); setResult(null); setProgress(null) }
   }
 
   const handleExtract = async () => {
     if (!file) return
     setLoading(true)
     setResult(null)
+    setProgress(null)
+
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const data = await api.postForm('/api/catalog/extract', fd)
-      setResult(data)
-      if (data.errores?.length) {
-        onToast({ type: 'error', text: `${data.errores.length} página(s) con errores de extracción.` })
+
+      const response = await fetch('/api/catalog/extract', { method: 'POST', body: fd })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.detail || `Error ${response.status}`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop()
+
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue
+          let event
+          try { event = JSON.parse(part.slice(6)) } catch { continue }
+
+          if (event.type === 'start') {
+            setProgress({ current: 0, total: event.total, found: 0 })
+          } else if (event.type === 'progress') {
+            setProgress({ current: event.page, total: event.total, found: event.total_found })
+          } else if (event.type === 'done') {
+            setResult(event)
+            if (event.errores?.length) {
+              onToast({ type: 'error', text: `${event.errores.length} página(s) con errores de extracción.` })
+            }
+          }
+        }
       }
     } catch (e) {
       onToast({ type: 'error', text: e.message })
     } finally {
       setLoading(false)
+      setProgress(null)
     }
   }
 
@@ -170,8 +299,8 @@ function ImportTab({ onImported, onToast }) {
     if (!result?.productos?.length) return
     setSaving(true)
     try {
-      const data = await api.post('/api/products/bulk', { productos: result.productos })
-      onToast({ type: 'ok', text: `${data.guardados} productos guardados.` })
+      const data = await api.post('/api/catalog/save', { productos: result.productos })
+      onToast({ type: 'ok', text: `${data.productos} productos y ${data.variantes} variantes guardados.` })
       onImported()
       setResult(null)
       setFile(null)
@@ -212,7 +341,7 @@ function ImportTab({ onImported, onToast }) {
         <input ref={inputRef} type="file" accept=".pdf" onChange={handleFile} style={{ display: 'none' }} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Btn variant="secondary" onClick={() => inputRef.current?.click()}>
+          <Btn variant="secondary" onClick={() => inputRef.current?.click()} disabled={loading}>
             Seleccionar PDF
           </Btn>
           {file && (
@@ -221,14 +350,12 @@ function ImportTab({ onImported, onToast }) {
             </span>
           )}
           <Btn onClick={handleExtract} disabled={!file || loading}>
-            {loading ? 'Extrayendo...' : 'Extraer productos'}
+            {loading ? 'Analizando...' : 'Extraer productos'}
           </Btn>
         </div>
 
-        {loading && (
-          <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 12 }}>
-            Claude está analizando el catálogo. Esto puede tomar unos minutos...
-          </p>
+        {loading && progress && (
+          <ProgressBar current={progress.current} total={progress.total} found={progress.found} />
         )}
       </div>
 
@@ -273,6 +400,11 @@ const ESTADO_COLOR = {
 }
 
 function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave, onFetchImages, showSave = true }) {
+  // Normalize field names: handles both Claude extraction format and Supabase format
+  const variantes  = p.variantes       || p.product_variants || []
+  const imagenes   = p.imagenes        || p.product_images   || []
+  const primeraSku = variantes[0]?.clave || variantes[0]?.codigo || p.sku
+
   return (
     <div style={{
       background: 'var(--surface)', border: '0.5px solid var(--border)',
@@ -296,17 +428,19 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
             </p>
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {p.sku && <Badge text={p.sku} />}
+            {primeraSku && <Badge text={primeraSku} />}
+            {p.marca && <Badge text={p.marca} />}
             {p.categoria && <Badge text={p.categoria} color="var(--accent)" />}
             {p.pagina_catalogo && <Badge text={`Pág. ${p.pagina_catalogo}`} />}
             {p.estado && <Badge text={p.estado} color={ESTADO_COLOR[p.estado]} />}
+            {variantes.length > 0 && <Badge text={`${variantes.length} var.`} />}
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {onFetchImages && p.id && (
             <Btn variant="ghost" style={{ padding: '5px 10px', fontSize: '11px' }} onClick={onFetchImages}>
-              {p.imagenes?.length ? `Fotos (${p.imagenes.length})` : 'Buscar fotos'}
+              {imagenes.length ? `Fotos (${imagenes.length})` : 'Buscar fotos'}
             </Btn>
           )}
           <Btn variant="ghost" style={{ padding: '5px 10px', fontSize: '11px' }} onClick={onEdit}>
@@ -327,28 +461,29 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
 
       {isEditing && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <EditRow label="SKU">
-            <EditInput value={p.sku} onChange={v => onChange('sku', v)} />
-          </EditRow>
           <EditRow label="Descripción">
             <EditTextarea value={p.descripcion} onChange={v => onChange('descripcion', v)} rows={3} />
           </EditRow>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <EditRow label="Precio distribuidor" style={{ flex: 1, minWidth: 120 }}>
-              <EditInput value={p.precio_distribuidor} onChange={v => onChange('precio_distribuidor', parseFloat(v) || null)} type="number" />
+            <EditRow label="Marca" style={{ flex: 1, minWidth: 120 }}>
+              <EditInput value={p.marca} onChange={v => onChange('marca', v)} />
             </EditRow>
-            <EditRow label="Precio MC" style={{ flex: 1, minWidth: 120 }}>
-              <EditInput value={p.precio_mc} onChange={v => onChange('precio_mc', parseFloat(v) || null)} type="number" />
+            <EditRow label="Categoría" style={{ flex: 1, minWidth: 150 }}>
+              <EditInput value={p.categoria} onChange={v => onChange('categoria', v)} />
             </EditRow>
-            <EditRow label="Margen %" style={{ flex: 1, minWidth: 100 }}>
-              <EditInput value={p.margen} onChange={v => onChange('margen', parseFloat(v) || 0)} type="number" />
-            </EditRow>
-            <EditRow label="Uds/caja" style={{ flex: 1, minWidth: 80 }}>
-              <EditInput value={p.unidades_caja} onChange={v => onChange('unidades_caja', parseInt(v) || null)} type="number" />
+            <EditRow label="Sección" style={{ minWidth: 80 }}>
+              <EditInput value={p.seccion} onChange={v => onChange('seccion', v)} />
             </EditRow>
           </div>
-          <EditRow label="Categoría MercadoLibre">
-            <EditInput value={p.categoria} onChange={v => onChange('categoria', v)} />
+          <EditRow label="Subcategoría">
+            <EditInput value={p.subcategoria} onChange={v => onChange('subcategoria', v)} />
+          </EditRow>
+          <EditRow label="Características (una por línea)">
+            <EditTextarea
+              value={(p.caracteristicas || []).join('\n')}
+              onChange={v => onChange('caracteristicas', v.split('\n').filter(Boolean))}
+              rows={3}
+            />
           </EditRow>
           <EditRow label="Estado">
             <select
@@ -364,31 +499,41 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
             </select>
           </EditRow>
 
-          {p.variantes?.length > 0 && (
-            <EditRow label={`Variantes (${p.variantes.length})`}>
-              <pre style={{
-                fontSize: '11px', color: 'var(--text-tertiary)', background: 'var(--bg)',
-                borderRadius: 'var(--radius-md)', padding: '8px 10px', margin: 0,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}>
-                {JSON.stringify(p.variantes, null, 2)}
-              </pre>
+          {variantes.length > 0 && (
+            <EditRow label={`Variantes (${variantes.length})`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {variantes.map((v, i) => (
+                  <div key={i} style={{
+                    fontSize: '11px', color: 'var(--text-secondary)', background: 'var(--bg)',
+                    borderRadius: 'var(--radius-md)', padding: '6px 10px',
+                    display: 'flex', gap: 10, flexWrap: 'wrap',
+                  }}>
+                    {(v.clave || v.codigo) && <span style={{ color: 'var(--accent)', fontWeight: '500' }}>{v.clave || v.codigo}</span>}
+                    {v.descripcion && <span>{v.descripcion}</span>}
+                    {v.precio_distribuidor != null && <span>${v.precio_distribuidor.toLocaleString()}</span>}
+                    {v.unidades_caja && <span>Caja: {v.unidades_caja}</span>}
+                  </div>
+                ))}
+              </div>
             </EditRow>
           )}
 
-          {p.imagenes?.length > 0 && (
-            <EditRow label={`Fotos (${p.imagenes.length})`}>
+          {imagenes.length > 0 && (
+            <EditRow label={`Fotos (${imagenes.length})`}>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {p.imagenes.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noreferrer">
-                    <img
-                      src={url}
-                      alt={`foto ${i + 1}`}
-                      style={{ width: 64, height: 64, objectFit: 'contain', background: '#fff', borderRadius: 6, border: '0.5px solid var(--border)' }}
-                      onError={e => { e.target.style.display = 'none' }}
-                    />
-                  </a>
-                ))}
+                {imagenes.map((img, i) => {
+                  const url = typeof img === 'string' ? img : img.url
+                  return (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img
+                        src={url}
+                        alt={`foto ${i + 1}`}
+                        style={{ width: 64, height: 64, objectFit: 'contain', background: '#fff', borderRadius: 6, border: '0.5px solid var(--border)' }}
+                        onError={e => { e.target.style.display = 'none' }}
+                      />
+                    </a>
+                  )
+                })}
               </div>
             </EditRow>
           )}
@@ -462,8 +607,9 @@ function ProductsTab({ onToast, refreshKey }) {
   useEffect(() => { load() }, [refreshKey])
 
   const handleSave = async (p) => {
+    const { nombre, descripcion, marca, categoria, subcategoria, seccion, caracteristicas, estado } = p
     try {
-      await api.patch(`/api/products/${p.id}`, p)
+      await api.patch(`/api/products/${p.id}`, { nombre, descripcion, marca, categoria, subcategoria, seccion, caracteristicas, estado })
       await load()
       setEditIdx(null)
       onToast({ type: 'ok', text: 'Producto actualizado.' })
@@ -696,6 +842,7 @@ export default function App() {
   const [stats, setStats] = useState(null)
   const [toast, setToast] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const loadStats = () => {
     api.get('/api/products/stats').then(setStats).catch(() => {})
@@ -711,28 +858,25 @@ export default function App() {
   const onToast = (msg) => setToast(msg)
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '28px 16px' }}>
-      <div style={{ maxWidth: '680px', margin: '0 auto' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
 
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
-          <img src={logo} alt="Kobber" style={{ width: '34px', height: '34px', borderRadius: '8px', objectFit: 'cover' }} />
-          <span style={{ fontSize: '15px', fontWeight: '500' }}>Kobber</span>
-          <span style={{
-            fontSize: '11px', color: 'var(--text-tertiary)', background: 'var(--surface)',
-            padding: '2px 8px', borderRadius: '4px', border: '0.5px solid var(--border)',
-          }}>
-            catálogo MercadoLibre
-          </span>
+      {/* Content */}
+      <div style={{ flex: 1, padding: '32px 28px', overflowY: 'auto' }}>
+        <div style={{ maxWidth: 700, margin: '0 auto' }}>
+          {tab === 'importar'  && <ImportTab onImported={handleImported} onToast={onToast} />}
+          {tab === 'productos' && <ProductsTab onToast={onToast} refreshKey={refreshKey} />}
+          {tab === 'exportar'  && <ExportTab onToast={onToast} />}
         </div>
-
-        <Tabs active={tab} onChange={setTab} stats={stats} />
-
-        {tab === 'importar'  && <ImportTab onImported={handleImported} onToast={onToast} />}
-        {tab === 'productos' && <ProductsTab onToast={onToast} refreshKey={refreshKey} />}
-        {tab === 'exportar'  && <ExportTab onToast={onToast} />}
-
       </div>
+
+      {/* Right sidebar */}
+      <Sidebar
+        active={tab}
+        onChange={setTab}
+        stats={stats}
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen(o => !o)}
+      />
 
       {toast && <Toast msg={toast} onClose={() => setToast(null)} />}
     </div>
