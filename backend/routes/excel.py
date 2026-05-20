@@ -5,12 +5,183 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from pydantic import BaseModel
 
 from database import get_client
 
 router = APIRouter()
+
+
+class MLVariantPct(BaseModel):
+    variant_id: str
+    porcentaje: Optional[float] = None
+
+
+class MLExportItem(BaseModel):
+    product_id: str
+    variantes: list[MLVariantPct] = []
+
+
+class MLExportRequest(BaseModel):
+    items: list[MLExportItem]
+
+
+@router.post("/generate-ml")
+def generate_ml_excel(body: MLExportRequest):
+    if not body.items:
+        raise HTTPException(400, "No hay productos para exportar")
+
+    db = get_client()
+    ids = [i.product_id for i in body.items]
+    # Mapa variant_id -> porcentaje
+    variant_pct_map: dict = {}
+    for item in body.items:
+        for v in item.variantes:
+            variant_pct_map[v.variant_id] = v.porcentaje
+
+    products = db.table("products").select(
+        "id, nombre, descripcion, marca, categoria, subcategoria, caracteristicas, "
+        "product_variants(id, clave, codigo, descripcion, precio_distribuidor, nc, unidades_caja, stock), "
+        "product_images(url, orden)"
+    ).in_("id", ids).execute().data
+
+    if not products:
+        raise HTTPException(404, "No se encontraron productos")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Publicar ML"
+
+    # ── Estilos ────────────────────────────────────────────────────────────────
+    COPPER   = "C8762C"
+    WHITE    = "FFFFFF"
+    ALT_ROW  = "FDF1E4"
+    BORDER_C = "D4CEC5"
+
+    thin   = Side(style="thin",   color=BORDER_C)
+    medium = Side(style="medium", color=BORDER_C)
+    border_data   = Border(left=thin, right=thin, top=thin, bottom=thin)
+    border_header = Border(left=medium, right=medium, top=medium, bottom=medium)
+
+    h_font   = Font(bold=True, color=WHITE,  size=10, name="Calibri")
+    d_font   = Font(color="1A1510",          size=10, name="Calibri")
+    price_font = Font(color="1A1510",        size=10, name="Calibri", bold=True)
+    green_font = Font(color="2E7D52",        size=10, name="Calibri", bold=True)
+    h_fill   = PatternFill("solid", fgColor=COPPER)
+    alt_fill = PatternFill("solid", fgColor=ALT_ROW)
+    center   = Alignment(horizontal="center", vertical="center", wrap_text=False)
+    left     = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+
+    # ── Columnas ───────────────────────────────────────────────────────────────
+    headers = [
+        ("Título (max 60 c.)",    45),
+        ("SKU / Clave",           16),
+        ("Código Trupper",        15),
+        ("EAN / NC",              14),
+        ("Condición",             10),
+        ("Marca",                 12),
+        ("Modelo",                16),
+        ("Precio [$]",            17),
+        ("Stock",                  7),
+        ("Uds/Caja",               9),
+        ("Descripción",           55),
+        ("Categoría",             30),
+        ("Forma de envío",        16),
+        ("Cuotas",                10),
+        ("Retiro en persona",     16),
+        ("Garantía",              12),
+        ("Fotos (URLs)",          60),
+    ]
+
+    # Fila de encabezado
+    ws.row_dimensions[1].height = 24
+    for col, (title, width) in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=title)
+        cell.font      = h_font
+        cell.fill      = h_fill
+        cell.border    = border_header
+        cell.alignment = center
+        ws.column_dimensions[cell.column_letter].width = width
+
+    # ── Filas de datos ─────────────────────────────────────────────────────────
+    row_idx = 2
+    id_order = {pid: i for i, pid in enumerate(ids)}
+    products.sort(key=lambda p: id_order.get(p["id"], 999))
+
+    for p in products:
+        fotos      = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
+        fotos_str  = ",".join(f["url"] for f in fotos)   # ML requiere coma como separador
+        variantes  = p.get("product_variants") or []
+        is_alt     = (row_idx % 2 == 0)
+        fill       = alt_fill if is_alt else PatternFill()
+
+        if not variantes:
+            variantes = [{}]
+
+        for v in variantes:
+            precio_base  = v.get("precio_distribuidor")
+            pct          = variant_pct_map.get(v.get("id"))
+            precio_venta = round(precio_base * (1 + (pct or 0) / 100)) if precio_base else None
+
+            # Título: nombre + clave, truncado a 60 caracteres
+            clave       = v.get("clave") or ""
+            titulo_raw  = f"{p.get('nombre', '')} {p.get('marca', '')} {clave}".strip()
+            titulo      = titulo_raw[:60]
+
+            row_data = [
+                titulo,
+                clave,
+                str(v.get("codigo") or ""),
+                str(v.get("nc") or ""),
+                "Nuevo",
+                p.get("marca") or "",
+                clave,
+                precio_venta,
+                v.get("stock") or 0,
+                v.get("unidades_caja") or "",
+                p.get("descripcion") or "",
+                p.get("categoria") or "",
+                "Mercado Envíos",
+                "Cuotas",
+                "Seleccionar",
+                "Seleccionar",
+                fotos_str,
+            ]
+
+            ws.row_dimensions[row_idx].height = 18
+            for col, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col, value=value)
+                cell.border    = border_data
+                cell.fill      = fill
+                if col == 8:        # precio final
+                    cell.font      = green_font
+                    cell.alignment = center
+                elif col in (9, 10):  # stock, uds/caja
+                    cell.font      = d_font
+                    cell.alignment = center
+                elif col == 11:     # descripción larga
+                    cell.font      = d_font
+                    cell.alignment = left
+                else:
+                    cell.font      = d_font
+                    cell.alignment = left
+
+            row_idx += 1
+
+    # Freeze header
+    ws.freeze_panes = "A2"
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"kobber_ML_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 class ExportRequest(BaseModel):
@@ -99,7 +270,7 @@ def export_excel(body: ExportRequest):
     row_idx = 2
     for p in products:
         fotos = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
-        fotos_str = " | ".join(f["url"] for f in fotos)
+        fotos_str = ",".join(f["url"] for f in fotos)   # ML requiere coma como separador
 
         caracteristicas_str = " | ".join(p.get("caracteristicas") or [])
 

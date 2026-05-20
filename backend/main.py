@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import init_storage
-from routes import catalog, products, excel, images
+from routes import analyzer, catalog, excel, images, products
 
 app = FastAPI(title="Kobber API", version="0.2.0")
 
@@ -33,7 +33,8 @@ def health():
     return {"status": "ok"}
 
 
-app.include_router(catalog.router,  prefix="/api/catalog",  tags=["catalog"])
-app.include_router(products.router, prefix="/api/products", tags=["products"])
-app.include_router(excel.router,    prefix="/api/excel",    tags=["excel"])
-app.include_router(images.router,   prefix="/api/images",   tags=["images"])
+app.include_router(catalog.router,   prefix="/api/catalog",   tags=["catalog"])
+app.include_router(products.router,  prefix="/api/products",  tags=["products"])
+app.include_router(excel.router,     prefix="/api/excel",     tags=["excel"])
+app.include_router(images.router,    prefix="/api/images",    tags=["images"])
+app.include_router(analyzer.router,  prefix="/api/analyzer",  tags=["analyzer"])

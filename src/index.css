@@ -1,17 +1,17 @@
 :root {
-  --bg: #131211;
-  --surface: #1C1B19;
-  --border: #282624;
-  --border-strong: #363330;
+  --bg: #F7F4F0;
+  --surface: #FFFFFF;
+  --border: #EAE5DD;
+  --border-strong: #D4CEC5;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  --text-primary: #F0EDE8;
-  --text-secondary: #A8A49E;
-  --text-tertiary: #6A6660;
+  --text-primary: #1A1510;
+  --text-secondary: #6B6258;
+  --text-tertiary: #9E9890;
   --accent: #C8762C;
-  --accent-dim: #2A1C0E;
-  --accent-text: #E8B080;
+  --accent-dim: #FDF1E4;
+  --accent-text: #9A5818;
 }
 
 *, *::before, *::after {
@@ -29,4 +29,18 @@ body {
 button {
   cursor: pointer;
   font-family: inherit;
+}
+
+/* Scrollbar sutil para tema claro */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* Inputs y selects globales */
+input, textarea, select {
+  outline: none;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent) !important;
 }
