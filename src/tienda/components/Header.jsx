@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ShoppingCart, Search, User, Menu, X } from 'lucide-react'
 import useCartStore, { selectCount } from '../store/cartStore'
-import logo from '../../assets/logo.png'
+import logo from '../../assets/logo-k.png'
 
 export default function Header({ onSearch }) {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -33,17 +33,7 @@ export default function Header({ onSearch }) {
 
           {/* Logo — recortado a la K con esquinas redondeadas */}
           <Link to="/tienda" className="shrink-0">
-            <div
-              className="w-9 h-9 rounded-xl"
-              style={{
-                backgroundImage: `url(${logo})`,
-                backgroundSize: '220%',
-                backgroundPosition: 'center 15%',
-                backgroundRepeat: 'no-repeat',
-              }}
-              role="img"
-              aria-label="Kobber"
-            />
+            <img src={logo} alt="Kobber" className="w-9 h-9 rounded-xl object-cover" />
           </Link>
 
           {/* Nav desktop */}

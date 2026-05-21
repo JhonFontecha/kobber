@@ -325,6 +325,17 @@ def _save_to_supabase(products_data: list) -> dict:
         # Categoría ML
         categoria_ml = get_ml_category(nombre)
 
+        # Deduplicación: saltar si ya existe un producto con mismo nombre y marca
+        existing = db.table("products") \
+            .select("id") \
+            .eq("nombre", nombre) \
+            .eq("marca", marca) \
+            .limit(1) \
+            .execute()
+        if existing.data:
+            print(f"[save] Duplicado ignorado: '{nombre}' ({marca})")
+            continue
+
         # La descripción ya viene mejorada desde la extracción (SSE)
         # Solo usamos lo que viene en p["descripcion"]
 
