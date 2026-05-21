@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ShoppingCart, Search, User, Menu, X, Wrench } from 'lucide-react'
+import { ShoppingCart, Search, User, Menu, X } from 'lucide-react'
 import useCartStore, { selectCount } from '../store/cartStore'
+import logo from '../../assets/logo.png'
 
 export default function Header({ onSearch }) {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -30,14 +31,19 @@ export default function Header({ onSearch }) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center h-16 gap-4">
 
-          {/* Logo — graphite-900 solo en header */}
-          <Link to="/tienda" className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 bg-graphite-900 rounded-md flex items-center justify-center">
-              <Wrench size={15} className="text-kobber-300" />
-            </div>
-            <span className="font-bold text-base text-graphite-900 hidden sm:block tracking-tight">
-              Kobber
-            </span>
+          {/* Logo — recortado a la K con esquinas redondeadas */}
+          <Link to="/tienda" className="shrink-0">
+            <div
+              className="w-9 h-9 rounded-xl"
+              style={{
+                backgroundImage: `url(${logo})`,
+                backgroundSize: '220%',
+                backgroundPosition: 'center 15%',
+                backgroundRepeat: 'no-repeat',
+              }}
+              role="img"
+              aria-label="Kobber"
+            />
           </Link>
 
           {/* Nav desktop */}
