@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import init_storage
-from routes import analyzer, catalog, excel, images, products
+from routes import analyzer, catalog, excel, images, products, store
 
 app = FastAPI(title="Kobber API", version="0.2.0")
 
@@ -38,3 +38,4 @@ app.include_router(products.router,  prefix="/api/products",  tags=["products"])
 app.include_router(excel.router,     prefix="/api/excel",     tags=["excel"])
 app.include_router(images.router,    prefix="/api/images",    tags=["images"])
 app.include_router(analyzer.router,  prefix="/api/analyzer",  tags=["analyzer"])
+app.include_router(store.router,     prefix="/api/store",     tags=["store"])

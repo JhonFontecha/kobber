@@ -2,21 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS vars — backward compat for Kobber tool (App.jsx inline styles) ──── */
+/* ── CSS vars — compat con Kobber tool (App.jsx usa inline styles con vars) ── */
 :root {
-  --bg:            #F7F4F0;
+  --bg:            #FAFAF7;
   --surface:       #FFFFFF;
-  --border:        #EAE5DD;
-  --border-strong: #D4CEC5;
-  --radius-sm:     6px;
+  --border:        #E8E4DC;
+  --border-strong: #D3CEC2;
+  --radius-sm:     4px;
   --radius-md:     8px;
   --radius-lg:     12px;
-  --text-primary:  #1A1510;
-  --text-secondary:#6B6258;
-  --text-tertiary: #9E9890;
-  --accent:        #C8762C;
-  --accent-dim:    #FDF1E4;
-  --accent-text:   #9A5818;
+  --text-primary:  #1C1916;
+  --text-secondary:#5C564A;
+  --text-tertiary: #A8A192;
+  --accent:        #C2622E;
+  --accent-dim:    #FDF5EF;
+  --accent-text:   #7C3D1B;
 }
 
 @layer base {
@@ -31,7 +31,6 @@
   }
 
   button { cursor: pointer; font-family: inherit; }
-
   input, textarea, select { outline: none; }
   input:focus, textarea:focus, select:focus {
     border-color: var(--accent) !important;
@@ -39,22 +38,40 @@
 
   ::-webkit-scrollbar        { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track  { background: transparent; }
-  ::-webkit-scrollbar-thumb  { background: var(--border-strong); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+  ::-webkit-scrollbar-thumb  { background: #D3CEC2; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #A8A192; }
 }
 
-/* ── Shared component classes (Store + Kobber tool) ─────────────────────── */
 @layer components {
-  .btn {
+  /* Botones — kobber-500 solo en acciones principales */
+  .btn-primary {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md
-           text-sm font-medium transition-all duration-150 select-none whitespace-nowrap;
+           text-sm font-semibold bg-kobber-500 text-white
+           hover:bg-kobber-600 active:scale-95 transition-all duration-150;
   }
-  .btn-primary  { @apply btn bg-accent text-white hover:bg-accent-dark active:scale-95; }
-  .btn-ghost    { @apply btn hover:bg-[#EAE5DD] text-[#6B6258]; }
-  .btn-outline  { @apply btn border border-[#D4CEC5] text-[#1A1510] hover:border-accent hover:text-accent; }
-  .btn-danger   { @apply btn bg-red-50 text-red-700 border border-red-200 hover:bg-red-100; }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md
+           text-sm font-medium text-graphite-600
+           hover:bg-graphite-100 transition-colors duration-150;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md
+           text-sm font-medium border border-graphite-300 text-graphite-700
+           hover:border-kobber-500 hover:text-kobber-500 transition-colors duration-150;
+  }
 
-  .card         { @apply bg-white border border-[#EAE5DD] rounded-lg shadow-card; }
-  .input-base   { @apply w-full bg-[#F7F4F0] border border-[#EAE5DD] rounded-md px-3 py-2 text-sm text-[#1A1510] placeholder-[#9E9890]; }
-  .badge-base   { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium; }
+  /* Card base */
+  .card { @apply bg-white border border-graphite-200 rounded-lg shadow-card; }
+
+  /* Input */
+  .input-base {
+    @apply w-full bg-graphite-50 border border-graphite-200 rounded-md px-3 py-2
+           text-sm text-graphite-900 placeholder-graphite-400
+           focus:border-kobber-500 focus:outline-none transition-colors;
+  }
+
+  /* Badge de estado — usando colores semánticos */
+  .badge-success { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-success; }
+  .badge-warning { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-warning; }
+  .badge-danger  { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-danger; }
 }

@@ -4,8 +4,8 @@ import { persist } from 'zustand/middleware'
 const useCartStore = create(
   persist(
     (set, get) => ({
-      items: [],       // [{ producto, cantidad }]
-      open: false,     // drawer abierto
+      items: [],
+      open:  false,
 
       addItem(producto) {
         set(state => {
@@ -38,16 +38,13 @@ const useCartStore = create(
 
       clearCart() { set({ items: [] }) },
       setOpen(open) { set({ open }) },
-
-      get total() {
-        return get().items.reduce((acc, i) => acc + i.producto.precio * i.cantidad, 0)
-      },
-      get count() {
-        return get().items.reduce((acc, i) => acc + i.cantidad, 0)
-      },
     }),
     { name: 'kobber-cart' }
   )
 )
+
+// Selectores derivados — usarlos en componentes
+export const selectTotal = s => s.items.reduce((acc, i) => acc + i.producto.precio * i.cantidad, 0)
+export const selectCount = s => s.items.reduce((acc, i) => acc + i.cantidad, 0)
 
 export default useCartStore

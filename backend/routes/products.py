@@ -350,6 +350,131 @@ def backfill_categoria_ml():
     }
 
 
+# ── Endpoints para la tienda pública ──────────────────────────────────────────
+
+_STORE_SELECT = (
+    "id, nombre, descripcion, marca, categoria, categoria_ml, caracteristicas, estado, "
+    "product_attributes(nombre, valor, unidad, variant_id), "
+    "product_variants(id, clave, codigo, descripcion, precio_distribuidor, nc, stock, unidades_caja, estado), "
+    "product_images(url, orden)"
+)
+
+
+@router.get("/tienda")
+def store_list(
+    q:         Optional[str]   = None,
+    categoria: Optional[str]   = None,
+    marca:     Optional[str]   = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    solo_stock: bool           = False,
+    margen:    float           = 30,
+):
+    """Lista de productos para la tienda pública con precio de venta calculado."""
+    db = get_client()
+    query = db.table("products").select(_STORE_SELECT).neq("estado", "descartado")
+
+    if categoria:
+        query = query.eq("categoria_ml", categoria)
+    if marca:
+        query = query.eq("marca", marca)
+
+    productos = query.order("nombre").execute().data
+
+    result = []
+    for p in productos:
+        variantes = [v for v in (p.get("product_variants") or []) if v.get("estado") != "inactivo"]
+        if not variantes:
+            continue
+
+        # Filtrar por búsqueda de texto
+        if q:
+            q_l = q.lower()
+            if not any(q_l in str(p.get(f, "")).lower()
+                       for f in ["nombre", "marca", "categoria", "descripcion"]):
+                # También buscar en claves de variantes
+                if not any(q_l in str(v.get("clave", "")).lower() for v in variantes):
+                    continue
+
+        # Precio base = primera variante con precio
+        precio_base = next((v["precio_distribuidor"] for v in variantes if v.get("precio_distribuidor")), None)
+        if precio_base is None:
+            continue
+
+        precio_venta = round(precio_base * (1 + margen / 100))
+
+        # Filtros de precio
+        if min_price and precio_venta < min_price:
+            continue
+        if max_price and precio_venta > max_price:
+            continue
+
+        # Solo con stock
+        stock_total = sum(v.get("stock") or 0 for v in variantes)
+        if solo_stock and stock_total == 0:
+            continue
+
+        fotos = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
+
+        result.append({
+            "id":           p["id"],
+            "nombre":       p["nombre"],
+            "descripcion":  p.get("descripcion"),
+            "marca":        p.get("marca"),
+            "categoria":    p.get("categoria"),
+            "categoria_ml": p.get("categoria_ml"),
+            "caracteristicas": p.get("caracteristicas") or [],
+            "atributos":    [a for a in (p.get("product_attributes") or []) if not a.get("variant_id")],
+            "variantes":    [
+                {
+                    **v,
+                    "precio_venta": round(v["precio_distribuidor"] * (1 + margen / 100)) if v.get("precio_distribuidor") else None,
+                }
+                for v in variantes
+            ],
+            "imagenes":     [f["url"] for f in fotos],
+            "precio":       precio_venta,
+            "precio_dist":  precio_base,
+            "stock_total":  stock_total,
+        })
+
+    return {"productos": result, "total": len(result)}
+
+
+@router.get("/tienda/{product_id}")
+def store_product(product_id: str, margen: float = 30):
+    """Detalle de un producto para la tienda."""
+    db = get_client()
+    rows = db.table("products").select(_STORE_SELECT).eq("id", product_id).execute().data
+    if not rows:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Producto no encontrado")
+
+    p = rows[0]
+    variantes = p.get("product_variants") or []
+    fotos = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
+    atributos_familia = [a for a in (p.get("product_attributes") or []) if not a.get("variant_id")]
+
+    return {
+        "id":           p["id"],
+        "nombre":       p["nombre"],
+        "descripcion":  p.get("descripcion"),
+        "marca":        p.get("marca"),
+        "categoria":    p.get("categoria"),
+        "categoria_ml": p.get("categoria_ml"),
+        "caracteristicas": p.get("caracteristicas") or [],
+        "atributos":    atributos_familia,
+        "variantes":    [
+            {
+                **v,
+                "precio_venta": round(v["precio_distribuidor"] * (1 + margen / 100)) if v.get("precio_distribuidor") else None,
+            }
+            for v in variantes
+        ],
+        "imagenes":     [f["url"] for f in fotos],
+        "stock_total":  sum(v.get("stock") or 0 for v in variantes),
+    }
+
 # ── Mejorar descripción y atributos con Claude ────────────────────────────────
 
 ENHANCE_PROMPT = """\

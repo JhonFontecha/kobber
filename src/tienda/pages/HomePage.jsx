@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ChevronLeft, ChevronRight, ShieldCheck, Truck, HeadphonesIcon, Tag } from 'lucide-react'
-import { getTendencias, getOfertas } from '../data/productos'
+import { useStoreProducts } from '../hooks/useStoreProducts'
 import ProductCard from '../components/ProductCard'
 
 const fmt = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -13,7 +13,7 @@ const SLIDES = [
     subtitulo: 'Las mejores marcas: Truper, Pretul, Urrea y más a precios de distribuidor.',
     cta:       'Ver catálogo completo',
     href:      '/tienda/catalogo',
-    bg:        'from-[#1A1510] to-[#3a2a1a]',
+    bg:        'from-graphite-900 to-graphite-800',
     img:       'https://images.unsplash.com/photo-1504148455328-c376907d081c?w=800&h=500&fit=crop',
   },
   {
@@ -22,7 +22,7 @@ const SLIDES = [
     subtitulo: 'Taladros, sierras, compresores y accesorios con descuentos especiales.',
     cta:       'Ver ofertas',
     href:      '/tienda/ofertas',
-    bg:        'from-[#9A5818] to-[#C8762C]',
+    bg:        'from-kobber-700 to-kobber-500',
     img:       'https://images.unsplash.com/photo-1530124566582-a618bc2615dc?w=800&h=500&fit=crop',
   },
   {
@@ -31,7 +31,7 @@ const SLIDES = [
     subtitulo: 'Protección personal completa para obra, industria y construcción.',
     cta:       'Explorar seguridad',
     href:      '/tienda/catalogo?categoria=Seguridad+industrial',
-    bg:        'from-[#1c3328] to-[#2E7D52]',
+    bg:        'from-graphite-800 to-success/80',
     img:       'https://images.unsplash.com/photo-1597766353939-97a5bb0f1b13?w=800&h=500&fit=crop',
   },
 ]
@@ -43,10 +43,12 @@ const VALORES = [
   { icon: Tag,             titulo: 'Mejor precio',        desc: 'Competimos con cualquier oferta' },
 ]
 
-export default function HomePage() {
+export default function HomePage({ onQuickView }) {
   const [slide, setSlide] = useState(0)
-  const tendencias = getTendencias()
-  const ofertas    = getOfertas()
+  const { productos } = useStoreProducts()
+  // Rotar los primeros productos como "tendencias" y los que tienen más imágenes como "ofertas"
+  const tendencias = productos.slice(0, 6)
+  const ofertas    = productos.filter(p => p.stock_total > 0).slice(6, 14)
 
   // Auto-avance del carrusel
   useEffect(() => {
@@ -78,7 +80,7 @@ export default function HomePage() {
                 </p>
                 <div className="mt-8 flex flex-wrap gap-3">
                   <Link to={s.href}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-white text-[#1A1510]
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-white text-graphite-900
                                font-semibold rounded-lg hover:bg-accent hover:text-white transition-colors">
                     {s.cta} <ArrowRight size={16} />
                   </Link>
@@ -120,17 +122,17 @@ export default function HomePage() {
       </section>
 
       {/* ── VALORES ─────────────────────────────────────────────────────── */}
-      <section className="bg-white border-b border-[#EAE5DD]">
+      <section className="bg-white border-b border-graphite-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {VALORES.map(v => (
               <div key={v.titulo} className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-md bg-[#FDF1E4] flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-md bg-kobber-50 flex items-center justify-center shrink-0">
                   <v.icon size={20} className="text-accent" />
                 </div>
                 <div>
-                  <p className="font-semibold text-sm text-[#1A1510]">{v.titulo}</p>
-                  <p className="text-xs text-[#9E9890]">{v.desc}</p>
+                  <p className="font-semibold text-sm text-graphite-900">{v.titulo}</p>
+                  <p className="text-xs text-graphite-400">{v.desc}</p>
                 </div>
               </div>
             ))}
@@ -142,8 +144,8 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 py-14">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h2 className="text-2xl font-bold text-[#1A1510]">Más vendidos</h2>
-            <p className="text-sm text-[#9E9890] mt-1">Los favoritos de nuestros clientes</p>
+            <h2 className="text-2xl font-bold text-graphite-900">Más vendidos</h2>
+            <p className="text-sm text-graphite-400 mt-1">Los favoritos de nuestros clientes</p>
           </div>
           <Link to="/tienda/catalogo"
             className="hidden sm:flex items-center gap-1 text-sm text-accent font-medium hover:underline">
@@ -151,7 +153,7 @@ export default function HomePage() {
           </Link>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {tendencias.map(p => <ProductCard key={p.id} producto={p} />)}
+          {tendencias.map(p => <ProductCard key={p.id} producto={p} onQuickView={onQuickView} />)}
         </div>
         <div className="mt-6 sm:hidden text-center">
           <Link to="/tienda/catalogo"
@@ -162,7 +164,7 @@ export default function HomePage() {
       </section>
 
       {/* ── BANNER PROMO ────────────────────────────────────────────────── */}
-      <section className="bg-[#1A1510] py-16">
+      <section className="bg-graphite-900 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center">
           <span className="inline-block bg-accent text-white text-xs font-bold uppercase tracking-widest
                            px-3 py-1 rounded-full mb-4">
@@ -186,8 +188,8 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 py-14">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h2 className="text-2xl font-bold text-[#1A1510]">Ofertas activas</h2>
-            <p className="text-sm text-[#9E9890] mt-1">Precio tachado = precio anterior</p>
+            <h2 className="text-2xl font-bold text-graphite-900">Ofertas activas</h2>
+            <p className="text-sm text-graphite-400 mt-1">Precio tachado = precio anterior</p>
           </div>
           <Link to="/tienda/ofertas"
             className="hidden sm:flex items-center gap-1 text-sm text-accent font-medium hover:underline">
@@ -195,15 +197,15 @@ export default function HomePage() {
           </Link>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {ofertas.slice(0, 8).map(p => <ProductCard key={p.id} producto={p} />)}
+          {ofertas.slice(0, 8).map(p => <ProductCard key={p.id} producto={p} onQuickView={onQuickView} />)}
         </div>
       </section>
 
       {/* ── SÍGUENOS ────────────────────────────────────────────────────── */}
-      <section className="bg-[#FDF1E4] py-12">
+      <section className="bg-kobber-50 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center">
-          <h2 className="text-xl font-bold text-[#1A1510]">Síguenos en redes</h2>
-          <p className="text-sm text-[#6B6258] mt-2">
+          <h2 className="text-xl font-bold text-graphite-900">Síguenos en redes</h2>
+          <p className="text-sm text-graphite-600 mt-2">
             Trucos, novedades y ofertas exclusivas para seguidores
           </p>
           <div className="mt-6 flex justify-center gap-4">
@@ -211,7 +213,7 @@ export default function HomePage() {
               { label: 'Facebook',  href: '#', color: 'bg-blue-600' },
               { label: 'Instagram', href: '#', color: 'bg-gradient-to-tr from-purple-600 via-pink-500 to-orange-400' },
               { label: 'WhatsApp', href: '#', color: 'bg-green-500' },
-              { label: 'TikTok',   href: '#', color: 'bg-[#1A1510]' },
+              { label: 'TikTok',   href: '#', color: 'bg-graphite-900' },
             ].map(r => (
               <a key={r.label} href={r.href} target="_blank" rel="noopener noreferrer"
                  className={`${r.color} text-white text-sm font-medium px-5 py-2.5 rounded-lg
