@@ -43,7 +43,7 @@ def generate_ml_excel(body: MLExportRequest):
     products = db.table("products").select(
         "id, nombre, descripcion, marca, categoria, subcategoria, caracteristicas, "
         "product_variants(id, clave, codigo, descripcion, precio_distribuidor, nc, unidades_caja, stock), "
-        "product_images(url, orden)"
+        "product_images(url, orden, variant_id)"
     ).in_("id", ids).execute().data
 
     if not products:
@@ -110,8 +110,7 @@ def generate_ml_excel(body: MLExportRequest):
     products.sort(key=lambda p: id_order.get(p["id"], 999))
 
     for p in products:
-        fotos      = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
-        fotos_str  = ",".join(f["url"] for f in fotos)   # ML requiere coma como separador
+        imagenes   = p.get("product_images") or []
         variantes  = p.get("product_variants") or []
         is_alt     = (row_idx % 2 == 0)
         fill       = alt_fill if is_alt else PatternFill()
@@ -123,6 +122,7 @@ def generate_ml_excel(body: MLExportRequest):
             precio_base  = v.get("precio_distribuidor")
             pct          = variant_pct_map.get(v.get("id"))
             precio_venta = round(precio_base * (1 + (pct or 0) / 100)) if precio_base else None
+            fotos_str    = _fotos_str_for_variant(imagenes, v.get("id"))
 
             # Título: nombre + clave, truncado a 60 caracteres
             clave       = v.get("clave") or ""
@@ -198,6 +198,19 @@ def _precio_venta(precio_base: float, margen: float) -> float:
     return round(precio_base * (1 + margen / 100), 2)
 
 
+def _fotos_str_for_variant(images: list[dict], variant_id: Optional[str]) -> str:
+    """
+    Cada variante tiene su propio código y por lo tanto sus propias fotos.
+    Prioriza las imágenes etiquetadas con esa variante; si no tiene ninguna,
+    cae a las imágenes sin variante asociada (fotos genéricas del producto).
+    """
+    imgs = images or []
+    propias = [i for i in imgs if variant_id and i.get("variant_id") == variant_id]
+    chosen = propias or [i for i in imgs if not i.get("variant_id")] or imgs
+    chosen = sorted(chosen, key=lambda x: x.get("orden", 0))
+    return ",".join(i["url"] for i in chosen)
+
+
 @router.post("/export")
 def export_excel(body: ExportRequest):
     db = get_client()
@@ -209,7 +222,7 @@ def export_excel(body: ExportRequest):
         "product_variants(id, codigo, clave, descripcion, precio_distribuidor, nc, "
         "unidades_caja, unidades_master, stock, estado, "
         "product_attributes(nombre, valor, unidad)), "
-        "product_images(url, orden)"
+        "product_images(url, orden, variant_id)"
     )
 
     if body.product_ids:
@@ -273,8 +286,7 @@ def export_excel(body: ExportRequest):
     # Una fila por variante
     row_idx = 2
     for p in products:
-        fotos = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
-        fotos_str = ",".join(f["url"] for f in fotos)   # ML requiere coma como separador
+        imagenes = p.get("product_images") or []
 
         caracteristicas_str = " | ".join(p.get("caracteristicas") or [])
 
@@ -284,6 +296,7 @@ def export_excel(body: ExportRequest):
 
         variantes = p.get("product_variants") or []
         if not variantes:
+            fotos_str = _fotos_str_for_variant(imagenes, None)
             ws.append([
                 p["id"], p.get("nombre") or "", p.get("descripcion") or "",
                 p.get("marca") or "", p.get("categoria") or "",
@@ -301,6 +314,7 @@ def export_excel(body: ExportRequest):
             margen = body.margen_global if body.margen_global is not None else 0
             precio_base = v.get("precio_distribuidor")
             precio_venta = _precio_venta(precio_base, margen) if precio_base else None
+            fotos_str = _fotos_str_for_variant(imagenes, v.get("id"))
 
             ws.append([
                 p["id"],

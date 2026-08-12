@@ -89,7 +89,19 @@ print("\n=== PASO 1: Identificando categorías vía API ===\n")
 plan = []
 categorias_a_agregar = {}   # category_name → {domain_name, producto_repr}
 
-for q in queries:
+# Cada línea puede venir como "categoria_ml_previa<TAB>nombre_producto"
+# (informativo, no se usa para decidir) o solo "nombre_producto". La
+# categoría SIEMPRE se decide con la consulta en vivo a domain_discovery de
+# abajo — la clasificación de ML puede cambiar con el tiempo, así que la BD
+# se resincroniza después con lo que se encuentre acá (ver download_template
+# en analyzer.py), en vez de forzar acá un valor de BD que podría ya no
+# coincidir con el árbol de categorías actual de ML.
+parsed_queries = []
+for line in queries:
+    q = line.split("\t", 1)[-1].strip() if "\t" in line else line.strip()
+    parsed_queries.append(q)
+
+for q in parsed_queries:
     # Verificar si no tiene categoría en ML
     if q.lower().strip() in SIN_CATEGORIA_ML:
         print(f"  ⏭️  {q[:45]:<45} → sin categoría en ML (omitido)")
@@ -161,9 +173,25 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
 
     page.screenshot(path=f"/tmp/ml_antes_busqueda.png")
 
-    # Buscar el campo de texto con múltiples estrategias
+    # Buscar el campo de texto con múltiples estrategias.
+    # OJO: el header de ML tiene su propio buscador global ("Buscar tus
+    # productos o ventas por título, SKU o #") cuyo placeholder también
+    # empieza con "Busca" — hay que evitarlo explícitamente o se le escribe
+    # ahí en vez del campo de categorías, y ML termina redirigiendo al chat
+    # del asistente en lugar de mostrar resultados de categoría.
+    HEADER_MARKERS = ("sku", "ventas")
+
+    def _es_buscador_header(el) -> bool:
+        try:
+            ph = (el.get_attribute("placeholder") or "").lower()
+            return any(m in ph for m in HEADER_MARKERS)
+        except Exception:
+            return False
+
     search = None
     SELECTORS = [
+        "input[placeholder*='características']",
+        "input[placeholder*='caracteristicas']",
         "input[placeholder*='ategor']",
         "input[placeholder*='busca']",
         "input[placeholder*='Busca']",
@@ -178,20 +206,23 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
     ]
     for sel in SELECTORS:
         try:
-            el = page.query_selector(sel)
-            if el and el.is_visible():
-                search = el
-                print(f"  Campo encontrado: {sel}")
+            els = page.query_selector_all(sel)
+            for el in els:
+                if el.is_visible() and not _es_buscador_header(el):
+                    search = el
+                    print(f"  Campo encontrado: {sel}")
+                    break
+            if search:
                 break
         except:
             continue
 
     if not search:
-        # Último recurso: cualquier input visible
+        # Último recurso: cualquier input visible que no sea el buscador del header
         all_inputs = page.query_selector_all("input")
         for el in all_inputs:
             try:
-                if el.is_visible():
+                if el.is_visible() and not _es_buscador_header(el):
                     search = el
                     print(f"  Campo encontrado via fallback (input visible)")
                     break
@@ -228,17 +259,17 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
     time.sleep(0.5)
 
     # 2. Click en botón "Buscar" del formulario (NO el tab)
-    #    Usamos JS para encontrar el botón dentro del mismo contenedor que el input
-    clicked_buscar = page.evaluate("""() => {
-        const inputs = document.querySelectorAll('input');
-        for (const input of inputs) {
-            const container = input.closest('form') || input.parentElement?.parentElement;
-            if (!container) continue;
-            const btn = container.querySelector('button');
-            if (btn && !btn.getAttribute('role')?.includes('tab')) {
-                btn.click();
-                return true;
-            }
+    #    Escaneamos el contenedor del campo `search` que YA identificamos como
+    #    correcto — antes se buscaba desde cero entre TODOS los inputs de la
+    #    página, lo que a veces terminaba haciendo clic en el botón del
+    #    buscador del header en vez del de categorías.
+    clicked_buscar = search.evaluate("""(input) => {
+        const container = input.closest('form') || input.parentElement?.parentElement;
+        if (!container) return false;
+        const btn = container.querySelector('button');
+        if (btn && !btn.getAttribute('role')?.includes('tab')) {
+            btn.click();
+            return true;
         }
         return false;
     }""")
@@ -247,6 +278,12 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
 
     time.sleep(2.5)
     page.screenshot(path=f"/tmp/ml_{category_name[:15].replace(' ','_')}_resultados.png")
+
+    # Si ML no encontró resultados, solo ofrece el chat del "Asistente" —
+    # no hay nada que agregar, así que salimos antes de caer en ese modal.
+    if page.query_selector("text=Sin resultados"):
+        print(f"  ❌ Sin resultados en ML para '{termino}' — agrega un SEARCH_OVERRIDES para esta categoría")
+        return False
 
     # 3. Primero buscar botones "Agregar" directamente visibles (resultados planos)
     def intentar_agregar():
@@ -289,6 +326,8 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         try:
             texto = item.inner_text().strip().lower()
             if not texto or len(texto) > 200:
+                continue
+            if "asistente" in texto or "necesito ayuda" in texto or "pregúntale" in texto:
                 continue
             if any(t[:15] in texto for t in targets):
                 print(f"  📂 Expandiendo: {texto[:60]}")

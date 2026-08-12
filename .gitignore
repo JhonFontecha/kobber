@@ -7,6 +7,7 @@ backend/.env
 backend/__pycache__/
 backend/routes/__pycache__/
 backend/*.pyc
+scripts/__pycache__/
 backend/storage/products.db
 backend/storage/images/
 backend/storage/exports/

@@ -95,6 +95,19 @@ ISSUE_LABELS = {
 }
 
 
+def _fotos_str_for_variant(images: list[dict], variant_id: str | None) -> str:
+    """
+    Cada variante tiene su propio código y por lo tanto sus propias fotos.
+    Prioriza las imágenes etiquetadas con esa variante; si no tiene ninguna,
+    cae a las imágenes sin variante asociada (fotos genéricas del producto).
+    """
+    imgs = images or []
+    propias = [i for i in imgs if variant_id and i.get("variant_id") == variant_id]
+    chosen = propias or [i for i in imgs if not i.get("variant_id")] or imgs
+    chosen = sorted(chosen, key=lambda x: x.get("orden", 0))
+    return ",".join(i["url"] for i in chosen[:8])
+
+
 def _detect_col(headers: list, keywords: list[str]) -> int | None:
     """Devuelve el índice (0-based) de la primera columna cuyo header contenga alguna keyword."""
     for i, h in enumerate(headers):
@@ -913,17 +926,16 @@ async def download_template(body: dict):
         raise HTTPException(400, "Se requieren product_ids")
 
     db = get_client()
-    productos = db.table("products").select("nombre, categoria_ml") \
+    productos = db.table("products").select("id, nombre, categoria_ml") \
         .in_("id", product_ids).execute().data
 
-    nombres = [p["nombre"] for p in productos if p.get("categoria_ml")]
-    if not nombres:
+    con_categoria = [p for p in productos if p.get("categoria_ml")]
+    if not con_categoria:
         raise HTTPException(400, "Los productos seleccionados no tienen categoria_ml asignada")
 
-    # Escribir lista de productos para el scraper
     nombres_file = "/tmp/ml_productos_seleccionados.txt"
     with open(nombres_file, "w") as f:
-        f.write("\n".join(nombres))
+        f.write("\n".join(f'{p["categoria_ml"]}\t{p["nombre"]}' for p in con_categoria))
 
     # Ejecutar el scraper como subprocess
     script = os.path.join(os.path.dirname(__file__), "../../scripts/ml_scrape_template.py")
@@ -952,6 +964,29 @@ async def download_template(body: dict):
     )
     if not downloads:
         raise HTTPException(500, "El scraper no descargó ningún archivo")
+
+    # La clasificación de ML puede cambiar con el tiempo (misma consulta,
+    # distinto resultado en días distintos), así que en vez de forzar al
+    # scraper a usar la categoria_ml ya guardada, resincronizamos la BD con
+    # la categoría que el scraper realmente encontró y logró agregar —
+    # verificado contra las hojas reales del archivo descargado — para que
+    # coincida con lo que fill-blank-template va a buscar en el paso 4.
+    try:
+        hojas_reales = set(openpyxl.load_workbook(downloads[0], read_only=True).sheetnames)
+        plan_path = "/tmp/ml_category_plan.json"
+        if os.path.exists(plan_path):
+            with open(plan_path) as f:
+                plan = json.load(f)
+            por_nombre = {p["nombre"]: p for p in productos}
+            for item in plan:
+                cat_real = item.get("category_name")
+                p = por_nombre.get(item.get("producto"))
+                if not p or not cat_real or cat_real not in hojas_reales:
+                    continue
+                if p.get("categoria_ml") != cat_real:
+                    db.table("products").update({"categoria_ml": cat_real}).eq("id", p["id"]).execute()
+    except Exception as e:
+        print(f"[download_template] no se pudo resincronizar categoria_ml: {e}")
 
     return FileResponse(
         downloads[0],
@@ -1154,7 +1189,7 @@ async def fill_blank_template(
         "product_attributes(nombre, valor, unidad, variant_id), "
         "product_variants(id, clave, codigo, nc, precio_distribuidor, stock, "
         "titulos_sugeridos, product_attributes(nombre, valor, unidad)), "
-        "product_images(url, orden)"
+        "product_images(url, orden, variant_id)"
     ).not_.is_("categoria_ml", "null")
 
     if ids_filter:
@@ -1259,9 +1294,7 @@ async def fill_blank_template(
         productos_hoja = cat_to_products.get(hoja, [])
 
         for p in productos_hoja:
-            fotos = sorted(p.get("product_images") or [], key=lambda x: x.get("orden", 0))
-            # ML requiere URLs separadas por coma (ver hoja Ayuda del template)
-            fotos_str = ",".join(f["url"] for f in fotos[:8])
+            imagenes_producto = p.get("product_images") or []
 
             # Atributos de familia (variant_id = None)
             familia_attrs = {
@@ -1287,6 +1320,7 @@ async def fill_blank_template(
                     for a in (v.get("product_attributes") or [])
                 }
                 all_attrs = {**familia_attrs, **variante_attrs}
+                fotos_str = _fotos_str_for_variant(imagenes_producto, v.get("id"))
 
                 # Títulos: usar los de BD si existen, si no el título genérico
                 titulos = v.get("titulos_sugeridos") or [titulo_generico]

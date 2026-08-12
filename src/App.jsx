@@ -2420,16 +2420,23 @@ function FlowTab({ onToast }) {
               (o búscalo en tu carpeta de Descargas si lo moviste).
             </p>
 
-            <div
+            <label
+              htmlFor="flow-template-file-input"
               style={{
+                display: 'block',
                 border: `2px dashed ${templateFile ? 'var(--accent)' : 'var(--border)'}`,
                 borderRadius: 'var(--radius-lg)', padding: '28px 20px', textAlign: 'center',
                 background: templateFile ? 'var(--accent-dim)' : 'var(--bg)', cursor: 'pointer',
                 transition: 'all 0.15s', marginBottom: 16,
               }}
-              onClick={() => templateRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => {
+                e.preventDefault()
+                const f = e.dataTransfer.files?.[0]
+                if (f) setTemplateFile(f)
+              }}
             >
-              <input ref={templateRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+              <input id="flow-template-file-input" ref={templateRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
                 onChange={e => setTemplateFile(e.target.files?.[0] || null)} />
               <p style={{ fontSize: '28px', margin: '0 0 8px' }}>📥</p>
               <p style={{ fontSize: '13px', fontWeight: '600', margin: '0 0 4px' }}>
@@ -2438,7 +2445,7 @@ function FlowTab({ onToast }) {
               <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: 0 }}>
                 {templateFile ? '✅ Archivo listo' : 'Haz clic o arrastra el archivo aquí'}
               </p>
-            </div>
+            </label>
 
             <Btn
               onClick={handleContinueToStep4}
@@ -2656,16 +2663,23 @@ function AnalyzeTab({ onToast }) {
           generado para agregar automáticamente los productos de la BD en cada hoja.
         </p>
 
-        <div
+        <label
+          htmlFor="analyze-ml-file-input"
           style={{
+            display: 'block',
             border: `2px dashed ${mlFile ? 'var(--accent)' : 'var(--border)'}`,
             borderRadius: 'var(--radius-lg)', padding: '32px 20px', textAlign: 'center',
             background: mlFile ? 'var(--accent-dim)' : 'var(--bg)', cursor: 'pointer',
             transition: 'all 0.15s',
           }}
-          onClick={() => mlRef.current?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => {
+            e.preventDefault()
+            const f = e.dataTransfer.files?.[0]
+            if (f) setMlFile(f)
+          }}
         >
-          <input ref={mlRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+          <input id="analyze-ml-file-input" ref={mlRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
             onChange={e => setMlFile(e.target.files?.[0] || null)} />
           <p style={{ fontSize: '32px', margin: '0 0 8px' }}>📥</p>
           <p style={{ fontSize: '13px', fontWeight: '600', margin: '0 0 4px' }}>
@@ -2674,7 +2688,7 @@ function AnalyzeTab({ onToast }) {
           <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: 0 }}>
             La que descargó el scraper (.xlsx)
           </p>
-        </div>
+        </label>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>

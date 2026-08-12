@@ -105,13 +105,15 @@ async def _fetch_for_clave(clave: str) -> list[str]:
     return [u for u in results if u]
 
 
-def _save_images(product_id: str, urls: list[str], fuente: str = "trupper_web"):
+def _save_images(product_id: str, urls: list[str], fuente: str = "trupper_web", variant_id: str | None = None):
     db = get_client()
-    # Borrar imágenes anteriores de esta fuente para este producto
-    db.table("product_images").delete().eq("product_id", product_id).eq("fuente", fuente).execute()
+    # Borrar imágenes anteriores de esta fuente para este producto/variante
+    q = db.table("product_images").delete().eq("product_id", product_id).eq("fuente", fuente)
+    q = q.eq("variant_id", variant_id) if variant_id else q.is_("variant_id", "null")
+    q.execute()
     if urls:
         db.table("product_images").insert([
-            {"product_id": product_id, "url": url, "orden": i, "fuente": fuente}
+            {"product_id": product_id, "variant_id": variant_id, "url": url, "orden": i, "fuente": fuente}
             for i, url in enumerate(urls)
         ]).execute()
 
@@ -120,32 +122,26 @@ def _save_images(product_id: str, urls: list[str], fuente: str = "trupper_web"):
 async def fetch_images_for_product(product_id: str):
     db = get_client()
 
-    # Obtener las claves de las variantes del producto
+    # Cada variante tiene su propia clave/código — hay que buscar imágenes por
+    # variante para no mezclar las fotos de un código con las de otro.
     variants = db.table("product_variants")\
-        .select("clave")\
+        .select("id, clave")\
         .eq("product_id", product_id)\
         .execute().data
-
-    claves = list({v["clave"] for v in variants if v.get("clave")})
-    if not claves:
+    variants = [v for v in variants if v.get("clave")]
+    if not variants:
         raise HTTPException(status_code=400, detail="El producto no tiene variantes con clave/SKU")
 
-    all_urls: list[str] = []
-    for clave in claves:
-        found = await _fetch_for_clave(clave)
-        all_urls.extend(found)
-
-    # Deduplicar manteniendo orden
-    seen = set()
-    unique_urls = [u for u in all_urls if not (u in seen or seen.add(u))]
-
-    _save_images(product_id, unique_urls)
+    resultados = []
+    for v in variants:
+        urls = await _fetch_for_clave(v["clave"])
+        _save_images(product_id, urls, variant_id=v["id"])
+        resultados.append({"variant_id": v["id"], "clave": v["clave"], "imagenes": urls, "total": len(urls)})
 
     return {
         "product_id": product_id,
-        "claves_buscadas": claves,
-        "imagenes": unique_urls,
-        "total": len(unique_urls),
+        "variantes": resultados,
+        "total": sum(r["total"] for r in resultados),
     }
 
 
@@ -159,46 +155,36 @@ async def fetch_images_bulk(body: BulkFetchRequest):
 
     if body.product_ids:
         rows = db.table("product_variants")\
-            .select("product_id, clave")\
+            .select("id, product_id, clave")\
             .in_("product_id", body.product_ids)\
             .execute().data
+        variantes = [r for r in rows if r.get("clave")]
     else:
-        # Sin IDs → buscar solo productos SIN imágenes
-        todos = db.table("product_variants").select("product_id, clave").execute().data
+        # Sin IDs → buscar solo variantes SIN imágenes propias
+        todos = db.table("product_variants").select("id, product_id, clave").execute().data
         con_imgs = {
-            r["product_id"]
-            for r in db.table("product_images").select("product_id").execute().data
+            r["variant_id"]
+            for r in db.table("product_images").select("variant_id")
+                .not_.is_("variant_id", "null").execute().data
         }
-        rows = [r for r in todos if r["product_id"] not in con_imgs]
+        variantes = [r for r in todos if r.get("clave") and r["id"] not in con_imgs]
 
-    # Agrupar claves por producto
-    from collections import defaultdict
-    by_product: dict[str, list[str]] = defaultdict(list)
-    for r in rows:
-        if r.get("clave"):
-            by_product[r["product_id"]].append(r["clave"])
-
-    if not by_product:
+    if not variantes:
         return {"procesados": 0, "con_imagenes": 0, "resultados": []}
 
     results = []
     BATCH = 8
 
-    product_ids = list(by_product.keys())
-    for i in range(0, len(product_ids), BATCH):
-        batch = product_ids[i: i + BATCH]
+    for i in range(0, len(variantes), BATCH):
+        batch = variantes[i: i + BATCH]
 
-        async def fetch_one(pid: str) -> dict:
-            claves = list(set(by_product[pid]))
-            all_urls: list[str] = []
-            for clave in claves:
-                all_urls.extend(await _fetch_for_clave(clave))
-            seen: set = set()
-            unique = [u for u in all_urls if not (u in seen or seen.add(u))]
-            _save_images(pid, unique)
-            return {"product_id": pid, "imagenes": unique, "total": len(unique)}
+        async def fetch_one(v: dict) -> dict:
+            urls = await _fetch_for_clave(v["clave"])
+            _save_images(v["product_id"], urls, variant_id=v["id"])
+            return {"product_id": v["product_id"], "variant_id": v["id"], "clave": v["clave"],
+                    "imagenes": urls, "total": len(urls)}
 
-        batch_results = await asyncio.gather(*[fetch_one(pid) for pid in batch])
+        batch_results = await asyncio.gather(*[fetch_one(v) for v in batch])
         results.extend(batch_results)
 
     con_imagenes = sum(1 for r in results if r["total"] > 0)
