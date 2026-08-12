@@ -1,4 +1,5 @@
 import { X, ShoppingCart, Trash2, Plus, Minus, ArrowRight } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import useCartStore, { selectTotal, selectCount } from '../store/cartStore'
 
 const fmt = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -12,6 +13,12 @@ export default function CartDrawer() {
   const clearCart      = useCartStore(s => s.clearCart)
   const total          = useCartStore(selectTotal)
   const count          = useCartStore(selectCount)
+  const navigate       = useNavigate()
+
+  const handleCheckout = () => {
+    setOpen(false)
+    navigate('/tienda/checkout')
+  }
 
   const subtotal   = total
   const iva        = Math.round(subtotal * 0.19)
@@ -127,8 +134,9 @@ export default function CartDrawer() {
                 <span className="text-kobber-700">{fmt(totalFinal)}</span>
               </div>
             </div>
-            <button className="w-full flex items-center justify-center gap-2 py-3 bg-kobber-500 text-white
-                               font-semibold rounded-lg hover:bg-kobber-600 transition-colors">
+            <button onClick={handleCheckout}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-kobber-500 text-white
+                         font-semibold rounded-lg hover:bg-kobber-600 transition-colors">
               Proceder al pago <ArrowRight size={15} />
             </button>
             <p className="text-center text-xs text-graphite-400">Envío calculado al finalizar</p>

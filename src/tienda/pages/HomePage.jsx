@@ -32,7 +32,7 @@ const SLIDES = [
     cta:       'Explorar seguridad',
     href:      '/tienda/catalogo?categoria=Seguridad+industrial',
     bg:        'from-graphite-800 to-success/80',
-    img:       'https://images.unsplash.com/photo-1597766353939-97a5bb0f1b13?w=800&h=500&fit=crop',
+    img:       'https://images.unsplash.com/photo-1581094288338-2314dddb7ece?w=800&h=500&fit=crop',
   },
 ]
 

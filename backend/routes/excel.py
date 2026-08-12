@@ -169,6 +169,10 @@ def generate_ml_excel(body: MLExportRequest):
 
             row_idx += 1
 
+        # Fila en blanco separadora entre productos
+        ws.row_dimensions[row_idx].height = 8
+        row_idx += 1
+
     # Freeze header
     ws.freeze_panes = "A2"
 
@@ -289,6 +293,8 @@ def export_excel(body: ExportRequest):
                 "", "", fotos_str, p.get("estado") or "", p.get("pagina_catalogo"),
             ])
             row_idx += 1
+            ws.append([])
+            row_idx += 1
             continue
 
         for v in variantes:
@@ -324,6 +330,10 @@ def export_excel(body: ExportRequest):
                 p.get("pagina_catalogo"),
             ])
             row_idx += 1
+
+        # Fila en blanco separadora entre productos
+        ws.append([])
+        row_idx += 1
 
     col_widths = [38, 45, 55, 12, 28, 22, 8, 50, 50, 38, 14, 16, 35, 18, 20, 10, 6, 8, 10, 8, 14, 50, 60, 14, 12]
     for col, width in enumerate(col_widths, 1):

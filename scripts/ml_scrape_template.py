@@ -41,6 +41,7 @@ SEARCH_OVERRIDES = {
     "Alambres para Soldar":   "pasta soldar",
     "Cintas de Peligro":      "cinta peligro",
     "Bandas de Caucho":       "llave filtro aceite",
+    "Alicates Crimpeadores":  "alicates crimpeadores",
 }
 
 # ── Leer queries ──────────────────────────────────────────────────────────────
@@ -155,26 +156,75 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
     con category_name O domain_name (lo que ML muestre en pantalla).
     """
     # Término de búsqueda: usar override si existe, si no el producto original
-    termino = SEARCH_OVERRIDES.get(category_name, producto[:60])
+    termino = SEARCH_OVERRIDES.get(category_name, category_name)
     print(f"\n  Buscando: '{termino[:50]}' → esperando '{category_name}' / '{domain_name[:35]}'")
 
+    page.screenshot(path=f"/tmp/ml_antes_busqueda.png")
+
+    # Buscar el campo de texto con múltiples estrategias
     search = None
-    for sel in ["input[placeholder*='ategor']", "input[placeholder*='busca']",
-                "input[type='search']", ".andes-form-control__field"]:
-        search = page.query_selector(sel)
-        if search and search.is_visible():
-            break
+    SELECTORS = [
+        "input[placeholder*='ategor']",
+        "input[placeholder*='busca']",
+        "input[placeholder*='Busca']",
+        "input[placeholder*='categ']",
+        "input[type='search']",
+        "input[type='text']",
+        ".andes-form-control__field",
+        "[class*='search'] input",
+        "[class*='Search'] input",
+        "[class*='input'] input",
+        "form input",
+    ]
+    for sel in SELECTORS:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                search = el
+                print(f"  Campo encontrado: {sel}")
+                break
+        except:
+            continue
 
     if not search:
-        print("  ⚠️  Campo de búsqueda no encontrado")
+        # Último recurso: cualquier input visible
+        all_inputs = page.query_selector_all("input")
+        for el in all_inputs:
+            try:
+                if el.is_visible():
+                    search = el
+                    print(f"  Campo encontrado via fallback (input visible)")
+                    break
+            except:
+                continue
+
+    if not search:
+        page.screenshot(path=f"/tmp/ml_sin_campo_busqueda.png")
+        print("  ⚠️  Campo de búsqueda no encontrado — ver /tmp/ml_sin_campo_busqueda.png")
         return False
 
     targets = [category_name.lower(), domain_name.lower()]
 
-    # 1. Limpiar y escribir término de búsqueda
-    search.click()
-    search.fill("")
-    search.type(termino, delay=80)
+    # 1. Limpiar y escribir — varios métodos para mayor compatibilidad
+    try:
+        search.click(timeout=5000)
+    except:
+        try:
+            search.focus()
+        except:
+            page.evaluate("el => el.focus()", search)
+
+    time.sleep(0.3)
+
+    try:
+        search.fill(termino)
+    except:
+        try:
+            search.triple_click()
+            search.type(termino, delay=60)
+        except:
+            page.evaluate(f"el => {{ el.value = '{termino}'; el.dispatchEvent(new Event('input', {{bubbles:true}})); }}", search)
+
     time.sleep(0.5)
 
     # 2. Click en botón "Buscar" del formulario (NO el tab)
@@ -217,15 +267,16 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
                         btn.click(); time.sleep(1); return True
                 except:
                     continue
-        # Fallback: primero visible
-        try:
-            text = btns[0].evaluate(
-                "b => b.closest('li')?.innerText || b.parentElement?.innerText || ''"
-            ).strip()
-            print(f"  ⚠️  Primera opción: {text[:60]}")
-            btns[0].click(); time.sleep(1); return True
-        except Exception as e:
-            print(f"  ⚠️  Error: {e}")
+        # Sin coincidencia exacta — mostrar opciones disponibles y NO hacer clic
+        print(f"  ⚠️  Sin coincidencia exacta para '{category_name}'. Opciones disponibles:")
+        for btn in btns[:5]:
+            try:
+                text = btn.evaluate(
+                    "b => b.closest('li')?.innerText || b.parentElement?.innerText || ''"
+                ).strip()
+                print(f"       · {text[:70]}")
+            except:
+                pass
         return False
 
     # Intento 1: botones directos
@@ -258,11 +309,25 @@ with sync_playwright() as p:
     page    = ctx.new_page()
 
     page.goto(URL)
-    page.wait_for_load_state("networkidle", timeout=20000)
+    page.wait_for_load_state("domcontentloaded", timeout=30000)
+    time.sleep(2)
+
+    # Captura inicial para diagnóstico
+    page.screenshot(path="/tmp/ml_inicio.png")
+    current_url = page.url
+    print(f"URL actual: {current_url}")
+
+    # Detectar si fue redirigido al login
+    if "login" in current_url or "registration" in current_url or "mercadolibre" not in current_url:
+        print("❌ Sesión expirada — redirigido al login. Corre ml_login.py primero.")
+        page.screenshot(path="/tmp/ml_login_redirect.png")
+        browser.close(); sys.exit(1)
+
     cerrar_tutorial(page)
 
     if not ir_a_tab_categorias(page):
-        print("⚠️  No se encontró el tab 'Buscar categorías'")
+        page.screenshot(path="/tmp/ml_sin_tab_categorias.png")
+        print("⚠️  No se encontró el tab 'Buscar categorías' — ver /tmp/ml_sin_tab_categorias.png")
         browser.close(); sys.exit(1)
 
     print("Tab activo: Buscar categorías\n")
@@ -294,12 +359,19 @@ with sync_playwright() as p:
         browser.close(); sys.exit(1)
 
     print("Descargando...")
-    with page.expect_download(timeout=30000) as dl:
-        download_btn.click()
-    download = dl.value
-    dest = DOWNLOAD_DIR / download.suggested_filename
-    download.save_as(dest)
-    print(f"\n✅ Plantilla descargada: {dest}")
+    page.screenshot(path="/tmp/ml_antes_descarga.png")
+    try:
+        with page.expect_download(timeout=60000) as dl:
+            download_btn.click(timeout=10000)
+        download = dl.value
+        dest = DOWNLOAD_DIR / download.suggested_filename
+        download.save_as(dest)
+        print(f"\n✅ Plantilla descargada: {dest}")
+    except Exception as e:
+        page.screenshot(path="/tmp/ml_error_descarga.png")
+        print(f"\n❌ Error al descargar: {e}")
+        print("   Captura guardada en /tmp/ml_error_descarga.png")
+        browser.close(); sys.exit(1)
     browser.close()
 
 print("\n=== RESUMEN ===")

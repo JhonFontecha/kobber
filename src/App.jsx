@@ -261,16 +261,28 @@ function Sidebar({ active, onChange, stats, open, onToggle }) {
 
 // ── Import PDF tab ─────────────────────────────────────────────────────────────
 
-function ProgressBar({ current, total, found }) {
+function ProgressBar({ current, total, found, lastElapsed, errors }) {
   const pct = total ? Math.round((current / total) * 100) : 0
   return (
     <div style={{ marginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
           Página {current} de {total}
+          {lastElapsed != null && (
+            <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>
+              · {lastElapsed}s
+            </span>
+          )}
         </span>
-        <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: '500' }}>
-          {found} producto{found !== 1 ? 's' : ''} encontrado{found !== 1 ? 's' : ''}
+        <span style={{ fontSize: '12px', fontWeight: '500', display: 'flex', gap: 10 }}>
+          {errors > 0 && (
+            <span style={{ color: 'var(--error, #ef4444)' }}>
+              {errors} error{errors !== 1 ? 'es' : ''}
+            </span>
+          )}
+          <span style={{ color: 'var(--accent)' }}>
+            {found} producto{found !== 1 ? 's' : ''}
+          </span>
         </span>
       </div>
       <div style={{
@@ -337,9 +349,11 @@ function ImportTab({ onImported, onToast }) {
           try { event = JSON.parse(part.slice(6)) } catch { continue }
 
           if (event.type === 'start') {
-            setProgress({ current: 0, total: event.total, found: 0 })
+            setProgress({ current: 0, total: event.total, found: 0, lastElapsed: null, errors: 0 })
           } else if (event.type === 'progress') {
-            setProgress({ current: event.page, total: event.total, found: event.total_found })
+            setProgress(prev => ({ current: event.page, total: event.total, found: event.total_found, lastElapsed: event.elapsed_s, errors: prev?.errors ?? 0 }))
+          } else if (event.type === 'page_error') {
+            setProgress(prev => prev ? ({ ...prev, current: event.page, lastElapsed: event.elapsed_s, errors: (prev.errors ?? 0) + 1 }) : prev)
           } else if (event.type === 'done') {
             setResult(event)
             if (event.errores?.length) {
@@ -395,16 +409,16 @@ function ImportTab({ onImported, onToast }) {
         borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: 16,
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
       }}>
-        <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: 4 }}>Subir catálogo PDF</p>
+        <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: 4 }}>Subir catálogo</p>
         <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: 14 }}>
-          Máximo 30 páginas por vez. Claude analizará cada página y extraerá todos los productos.
+          PDF (máx. 30 páginas) o imagen JPG/PNG/WEBP de una página. Claude extraerá todos los productos.
         </p>
 
-        <input ref={inputRef} type="file" accept=".pdf" onChange={handleFile} style={{ display: 'none' }} />
+        <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={handleFile} style={{ display: 'none' }} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <Btn variant="secondary" onClick={() => inputRef.current?.click()} disabled={loading}>
-            Seleccionar PDF
+            Seleccionar archivo
           </Btn>
           {file && (
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -417,7 +431,7 @@ function ImportTab({ onImported, onToast }) {
         </div>
 
         {loading && progress && (
-          <ProgressBar current={progress.current} total={progress.total} found={progress.found} />
+          <ProgressBar current={progress.current} total={progress.total} found={progress.found} lastElapsed={progress.lastElapsed} errors={progress.errors} />
         )}
       </div>
 
@@ -546,6 +560,7 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
             {p.estado && <Badge text={p.estado} color={ESTADO_COLOR[p.estado]} />}
             {variantes.length > 0 && <Badge text={`${variantes.length} var.`} />}
           </div>
+
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -650,6 +665,41 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
                     </a>
                   )
                 })}
+              </div>
+            </EditRow>
+          )}
+
+          {p.titulos_por_variante?.length > 0 && (
+            <EditRow label="Títulos sugeridos para MercadoLibre">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {p.titulos_por_variante.map((item, vi) => (
+                  <div key={vi}>
+                    <div style={{
+                      fontSize: '10px', fontFamily: 'monospace', fontWeight: '700',
+                      color: 'var(--accent)', marginBottom: 4, textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                    }}>
+                      {item.clave || `Variante ${vi + 1}`}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {item.titulos?.map((t, ti) => (
+                        <div key={ti} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          background: 'var(--bg)', border: '0.5px solid var(--border)',
+                          borderRadius: 6, padding: '5px 10px', gap: 10,
+                        }}>
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t}</span>
+                          <span style={{
+                            fontSize: '10px', fontWeight: '600', flexShrink: 0,
+                            color: t.length > 55 ? '#f97316' : 'var(--text-tertiary)',
+                          }}>
+                            {t.length}/60
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </EditRow>
           )}
@@ -803,6 +853,59 @@ function ProductsTab({ onToast }) {
   const [enhApplyDesc,  setEnhApplyDesc]  = useState(true)
   const [enhApplyAttrs, setEnhApplyAttrs] = useState([])
   const [applying,      setApplying]      = useState(false)
+
+  // Redescribe all state
+  const [redescribing,   setRedescribing]   = useState(false)
+  const [redescProgress, setRedescProgress] = useState(null)
+
+  const handleRedescribeAll = async () => {
+    if (!confirm('¿Re-generar las descripciones de TODOS los productos con el nuevo formato? Esto no se puede deshacer.')) return
+    setRedescribing(true)
+    setRedescProgress({ current: 0, total: 0, updated: 0, errors: 0, nombre: '' })
+    try {
+      const res = await fetch('/api/products/redescribe-all', { method: 'POST' })
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const parts = buf.split('\n\n')
+        buf = parts.pop()
+        for (const part of parts) {
+          if (!part.startsWith('data:')) continue
+          try {
+            const ev = JSON.parse(part.slice(5))
+            if (ev.type === 'start') setRedescProgress({ current: 0, total: ev.total, updated: 0, errors: 0, nombre: '' })
+            else if (ev.type === 'progress') setRedescProgress({ current: ev.current, total: ev.total, updated: ev.updated, errors: ev.errors, nombre: ev.nombre })
+            else if (ev.type === 'done') {
+              onToast({ type: 'success', text: `${ev.updated} descripciones actualizadas${ev.errors ? ` · ${ev.errors} errores` : ''}` })
+              setRedescProgress(null)
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    } finally {
+      setRedescribing(false)
+    }
+  }
+
+  const handleFetchImages = async (productId) => {
+    try {
+      await api.post(`/api/images/fetch/${productId}`, {})
+      onToast({ type: 'ok', text: 'Imágenes actualizadas' })
+      // Refrescar el producto en la lista
+      setProducts(prev => prev.map(p => p.id === productId
+        ? { ...p, _imgRefresh: Date.now() }
+        : p
+      ))
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    }
+  }
 
   const handleEnhance = async (productId) => {
     setEnhancingId(productId)
@@ -1197,6 +1300,14 @@ function ProductsTab({ onToast }) {
                   <Btn
                     variant="ghost"
                     style={{ padding: '4px 8px', fontSize: '11px' }}
+                    title="Buscar imágenes"
+                    onClick={() => handleFetchImages(p.id)}
+                  >
+                    🖼
+                  </Btn>
+                  <Btn
+                    variant="ghost"
+                    style={{ padding: '4px 8px', fontSize: '11px' }}
                     disabled={enhancingId === p.id}
                     onClick={() => enhanceResult?.productId === p.id ? setEnhanceResult(null) : handleEnhance(p.id)}
                   >
@@ -1374,6 +1485,40 @@ function ProductsTab({ onToast }) {
             </div>
           )
         })}
+      </div>
+
+      {/* Re-describir todos */}
+      <div style={{
+        marginTop: 24, padding: '16px 20px',
+        background: 'var(--bg-card)', border: '0.5px solid var(--border)',
+        borderRadius: 'var(--radius-lg)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: 2 }}>Re-generar todas las descripciones</p>
+            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              Aplica el nuevo formato a todos los productos existentes en la base de datos.
+            </p>
+          </div>
+          <Btn variant="secondary" onClick={handleRedescribeAll} disabled={redescribing}>
+            {redescribing ? 'Procesando...' : '✦ Actualizar descripciones'}
+          </Btn>
+        </div>
+        {redescribing && redescProgress && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: 4 }}>
+              <span>{redescProgress.current} / {redescProgress.total} — <em>{redescProgress.nombre}</em></span>
+              <span style={{ color: 'var(--accent)' }}>{redescProgress.updated} actualizados{redescProgress.errors > 0 && <span style={{ color: '#ef4444', marginLeft: 8 }}>{redescProgress.errors} errores</span>}</span>
+            </div>
+            <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2, background: 'var(--accent)',
+                width: redescProgress.total ? `${(redescProgress.current / redescProgress.total) * 100}%` : '0%',
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1747,18 +1892,45 @@ function FlowTab({ onToast }) {
   // ── Paso 1: búsqueda ────────────────────────────────────────────────────────
   const [searchMode,  setSearchMode]  = useState('idle')
   const [products,    setProducts]    = useState([])
-  const [variantPcts, setVariantPcts] = useState({})
+  const [variantPcts,   setVariantPcts]   = useState({})
+  const [productStocks, setProductStocks] = useState({})  // {product_id: stock}
   const [summary,     setSummary]     = useState(null)
   const [pastedText,  setPastedText]  = useState('')
   const [defaultPct,  setDefaultPct]  = useState(30)
   const [searchFile,  setSearchFile]  = useState(null)
   const [searchLoad,  setSearchLoad]  = useState(false)
+  const [pageNum,     setPageNum]     = useState('')
   const searchFileRef = useRef()
 
   // ── Paso 2: descargar plantillas ────────────────────────────────────────────
   const [downloading,   setDownloading]   = useState(false)
   const [templateBlob,  setTemplateBlob]  = useState(null)
   const [templateName,  setTemplateName]  = useState(null)
+  const [mlLogging,     setMlLogging]     = useState(false)
+  const [mlSession,     setMlSession]     = useState(null) // null=checking, true=active, false=expired
+
+  const checkMlSession = async () => {
+    setMlSession(null)
+    try {
+      const data = await api.get('/api/analyzer/ml-session-status')
+      setMlSession(data.active)
+    } catch {
+      setMlSession(false)
+    }
+  }
+
+  const handleMlLogin = async () => {
+    setMlLogging(true)
+    onToast({ type: 'ok', text: 'Browser abierto — inicia sesión en ML y navega a la página de categorías.' })
+    try {
+      await api.post('/api/analyzer/ml-login', {})
+      onToast({ type: 'ok', text: '✅ Sesión ML guardada. Ya puedes descargar plantillas.' })
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    } finally {
+      setMlLogging(false)
+    }
+  }
 
   // ── Paso 3: subir plantilla ─────────────────────────────────────────────────
   const [templateFile, setTemplateFile] = useState(null)
@@ -1767,14 +1939,19 @@ function FlowTab({ onToast }) {
   // ── Paso 4: rellenar y descargar ────────────────────────────────────────────
   const [margen,   setMargen]   = useState('')
   const [filling,  setFilling]  = useState(false)
+  const [fillResumen, setFillResumen] = useState(null)
 
   // ── Helpers paso 1 ──────────────────────────────────────────────────────────
   const initVariantPcts = (prods, pctMap) => {
     const vp = {}
-    for (const p of prods)
+    const st = {}
+    for (const p of prods) {
       for (const v of (p.product_variants || []))
         vp[v.id] = pctMap[p.id] ?? null
+      st[p.id] = 3  // stock por defecto
+    }
     setVariantPcts(vp)
+    setProductStocks(st)
   }
 
   const setProductPct = (p, pct) =>
@@ -1788,6 +1965,21 @@ function FlowTab({ onToast }) {
   const primaryPrice = p => (p.product_variants||[])[0]?.precio_distribuidor ?? null
   const primaryPct   = p => { const v = (p.product_variants||[])[0]; return v ? (variantPcts[v.id]??null) : null }
   const calcVenta    = (precio, pct) => precio != null && pct != null ? Math.round(precio*(1+pct/100)) : null
+
+  const searchByPage = async () => {
+    const pagina = parseInt(pageNum)
+    if (!pagina) return
+    setSearchLoad(true)
+    try {
+      const data = await api.get(`/api/products/by-page?pagina=${pagina}&porcentaje=${defaultPct}`)
+      setProducts(data.products || [])
+      initVariantPcts(data.products || [], Object.fromEntries((data.products || []).map(p => [p.id, defaultPct])))
+      const totalVariantes = (data.products || []).reduce((s, p) => s + (p.product_variants || []).length, 0)
+      setSummary({ encontrados: data.encontrados, total_codigos: `página ${pagina}`, no_encontrados: [], totalVariantes })
+      setSearchMode('results')
+    } catch (e) { onToast({ type: 'error', text: e.message }) }
+    finally { setSearchLoad(false) }
+  }
 
   const searchByText = async () => {
     const codes = pastedText.split(',').map(c => c.trim()).filter(Boolean)
@@ -1817,6 +2009,11 @@ function FlowTab({ onToast }) {
     } catch (e) { onToast({ type: 'error', text: e.message }) }
     finally { setSearchLoad(false) }
   }
+
+  // Verificar sesión ML automáticamente al entrar al paso 2
+  useEffect(() => {
+    if (step === 2) checkMlSession()
+  }, [step])
 
   // ── Helper paso 1 → paso 2 ──────────────────────────────────────────────────
   const handleContinueToStep2 = () => {
@@ -1870,23 +2067,37 @@ function FlowTab({ onToast }) {
       : null)
     if (!file) return
     setFilling(true)
+    setFillResumen(null)
     try {
       const fd = new FormData()
       fd.append('ml_file', file)
       fd.append('product_ids', JSON.stringify(products.map(p => p.id)))
-      const pct = parseFloat(margen) || 0
-      const r   = await fetch(`/api/analyzer/fill-blank-template?margen=${pct}`, { method: 'POST', body: fd })
+      fd.append('product_stocks', JSON.stringify(productStocks))
+      const r = await fetch(`/api/analyzer/fill-blank-template?margen=${defaultPct || 0}`, { method: 'POST', body: fd })
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error') }
-      const filas = r.headers.get('X-Filas') || '?'
-      const hojas = r.headers.get('X-Hojas') || '?'
-      const blob  = await r.blob()
-      const url   = URL.createObjectURL(blob)
-      const a     = document.createElement('a')
+
+      const filas      = r.headers.get('X-Filas') || '?'
+      const hojas      = r.headers.get('X-Hojas') || '?'
+      const publicados = parseInt(r.headers.get('X-Publicados') || '0')
+      const faltantes  = parseInt(r.headers.get('X-Faltantes') || '0')
+      const resumenB64 = r.headers.get('X-Resumen')
+      if (resumenB64) {
+        try { setFillResumen(JSON.parse(atob(resumenB64))) } catch {}
+      }
+
+      const blob = await r.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
       a.href = url
       a.download = `kobber_ML_listo_${new Date().toISOString().slice(0, 10)}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
-      onToast({ type: 'ok', text: `✅ Listo: ${filas} productos en ${hojas} hojas. Descargado.` })
+
+      if (faltantes > 0) {
+        onToast({ type: 'error', text: `⚠️ ${publicados} publicados, ${faltantes} faltantes. Revisa el resumen.` })
+      } else {
+        onToast({ type: 'ok', text: `✅ ${publicados} variantes en ${hojas} hojas. Descargado.` })
+      }
     } catch (e) {
       onToast({ type: 'error', text: e.message })
     } finally {
@@ -1939,6 +2150,31 @@ function FlowTab({ onToast }) {
               <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
             </div>
 
+            {/* Página del catálogo */}
+            <div style={cardStyle}>
+              <p style={{ fontSize: '13px', fontWeight: '600', marginBottom: 4 }}>Buscar por página del catálogo</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 14 }}>
+                Trae todos los productos extraídos de esa página
+              </p>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  type="number" min={1} placeholder="Ej: 18"
+                  value={pageNum} onChange={e => setPageNum(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && searchByPage()}
+                  style={{ ...inputBase, width: 100 }}
+                />
+                <Btn onClick={searchByPage} disabled={!pageNum || searchLoad}>
+                  {searchLoad ? 'Buscando...' : 'Buscar'}
+                </Btn>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>o</span>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            </div>
+
             {/* Texto */}
             <div style={cardStyle}>
               <p style={{ fontSize: '13px', fontWeight: '600', marginBottom: 4 }}>Pegar códigos</p>
@@ -1949,12 +2185,6 @@ function FlowTab({ onToast }) {
                 onChange={e => setPastedText(e.target.value)} rows={3}
                 style={{ ...inputBase, resize: 'vertical', marginBottom: 12 }} />
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>% Ganancia:</label>
-                  <input type="number" min={0} max={500} value={defaultPct}
-                    onChange={e => setDefaultPct(Number(e.target.value))}
-                    style={{ ...inputBase, width: 70 }} />
-                </div>
                 <Btn onClick={searchByText} disabled={!pastedText.trim() || searchLoad}>
                   {searchLoad ? 'Buscando...' : 'Buscar'}
                 </Btn>
@@ -1968,11 +2198,46 @@ function FlowTab({ onToast }) {
               <Btn variant="ghost" style={{ padding: '5px 10px', fontSize: '12px' }}
                 onClick={() => setSearchMode('idle')}>← Buscar de nuevo</Btn>
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flex: 1 }}>
-                {summary?.encontrados} producto(s) de {summary?.total_codigos} código(s)
+                {summary?.encontrados} producto(s)
+                {summary?.totalVariantes != null
+                  ? ` · ${summary.totalVariantes} variante(s)`
+                  : ` de ${summary?.total_codigos} código(s)`}
               </span>
               <Btn onClick={handleContinueToStep2} disabled={!products.length}>
                 Continuar al paso 2 →
               </Btn>
+              <Btn variant="secondary" onClick={() => { if (products.length) setStep(3) }} disabled={!products.length}
+                title="Saltar descarga de plantilla — usar una plantilla ya descargada">
+                Tengo plantilla → paso 3
+              </Btn>
+            </div>
+
+            {/* Controles globales */}
+            <div style={{
+              background: 'var(--bg)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', padding: '12px 16px',
+              display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap',
+            }}>
+              <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)' }}>Aplicar a todos:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>% Ganancia:</label>
+                <input type="number" min={0} max={500} value={defaultPct}
+                  onChange={e => {
+                    const v = Number(e.target.value)
+                    setDefaultPct(v)
+                    setVariantPcts(prev => Object.fromEntries(Object.keys(prev).map(k => [k, v])))
+                  }}
+                  style={{ width: 70, padding: '4px 8px', fontSize: '12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Stock:</label>
+                <input type="number" min={0} max={9999} defaultValue={3}
+                  onChange={e => {
+                    const v = Number(e.target.value) || 3
+                    setProductStocks(prev => Object.fromEntries(Object.keys(prev).map(k => [k, v])))
+                  }}
+                  style={{ width: 70, padding: '4px 8px', fontSize: '12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)' }} />
+              </div>
             </div>
 
             {summary?.no_encontrados?.length > 0 && (
@@ -1983,7 +2248,7 @@ function FlowTab({ onToast }) {
 
             {/* Tabla resultados */}
             <div style={{ background: 'var(--accent)', borderRadius: 'var(--radius-md) var(--radius-md) 0 0', padding: '7px 12px', display: 'grid', gridTemplateColumns: RES_COLS, gap: 8 }}>
-              {['Nombre', 'Código', 'P. Dist.', 'Gan.', 'P. Venta', 'Estado', ''].map((h,i) => (
+              {['Nombre', 'Código', 'P. Dist.', 'Stock', 'P. Venta', 'Estado', ''].map((h,i) => (
                 <span key={i} style={{ fontSize: '11px', color: '#fff', fontWeight: '600' }}>{h}</span>
               ))}
             </div>
@@ -2006,12 +2271,11 @@ function FlowTab({ onToast }) {
                     <span style={{ fontSize: '12px', color: 'var(--accent)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{code||'—'}</span>
                     <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{pDist!=null?`$${pDist.toLocaleString()}`:'—'}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <input type="number" min={0} max={999} value={pct??''}
-                        onChange={e => setProductPct(p, e.target.value===''?null:Number(e.target.value))}
+                      <input type="number" min={0} max={9999} value={productStocks[p.id]??3}
+                        onChange={e => setProductStocks(prev => ({ ...prev, [p.id]: e.target.value===''?3:Number(e.target.value) }))}
                         style={{ width: 48, padding: '3px 5px', fontSize: '12px', textAlign: 'center', background: 'transparent', border: '1px solid transparent', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }}
                         onFocus={e => e.target.style.borderColor='var(--accent)'}
                         onBlur={e  => e.target.style.borderColor='transparent'} />
-                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>%</span>
                     </div>
                     <span style={{ fontSize: '12px', fontWeight: '600', color: pVenta!=null?'#2E7D52':'var(--text-tertiary)' }}>
                       {pVenta!=null?`$${pVenta.toLocaleString()}`:'—'}
@@ -2071,8 +2335,32 @@ function FlowTab({ onToast }) {
               </div>
             ) : null}
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <Btn onClick={handleDownloadTemplate} disabled={downloading}>
+            {/* Estado de sesión ML */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 14px', borderRadius: 'var(--radius-md)',
+              marginBottom: 8,
+              background: mlSession === null ? 'var(--bg)' : mlSession ? '#E8F5E9' : '#FFF3E0',
+              border: `1px solid ${mlSession === null ? 'var(--border)' : mlSession ? '#A5D6A7' : '#FFCC80'}`,
+            }}>
+              <span style={{ fontSize: '18px' }}>
+                {mlSession === null ? '⏳' : mlSession ? '🟢' : '🔴'}
+              </span>
+              <span style={{ fontSize: '12px', flex: 1, color: mlSession === null ? 'var(--text-tertiary)' : mlSession ? '#1B5E20' : '#E65100' }}>
+                {mlSession === null
+                  ? 'Verificando sesión de MercadoLibre...'
+                  : mlSession
+                    ? 'Sesión activa — puedes descargar plantillas'
+                    : 'Sin sesión del scraper — usa "🔑 Renovar sesión ML" (diferente a tener ML abierto en el browser)'}
+              </span>
+              <Btn variant="ghost" onClick={checkMlSession} disabled={mlLogging}
+                style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
+                {mlSession === null ? '...' : '↻ Verificar'}
+              </Btn>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Btn onClick={handleDownloadTemplate} disabled={downloading || mlLogging || mlSession === false}>
                 {downloading ? 'Ejecutando scraper... (1-2 min)' : '⬇ Descargar plantillas'}
               </Btn>
               {templateBlob && (
@@ -2080,6 +2368,10 @@ function FlowTab({ onToast }) {
                   Continuar al paso 3 →
                 </Btn>
               )}
+              <Btn variant="ghost" onClick={handleMlLogin} disabled={mlLogging || downloading}
+                style={{ fontSize: '12px', padding: '6px 12px', marginLeft: 'auto' }}>
+                {mlLogging ? 'Esperando login...' : '🔑 Renovar sesión ML'}
+              </Btn>
             </div>
           </div>
         </div>
@@ -2155,29 +2447,123 @@ function FlowTab({ onToast }) {
               usando los datos de la base de datos (precio, EAN, stock, descripción, fotos).
             </p>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                Margen sobre precio dist. (%)
-              </label>
-              <input
-                type="number" min="0" max="200" step="0.5"
-                value={margen}
-                onChange={e => setMargen(e.target.value)}
-                placeholder="0"
-                style={{
-                  width: 80, padding: '6px 10px', fontSize: '13px',
-                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg)', color: 'var(--text-primary)',
-                }}
-              />
-              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                0 = precio distribuidor directo
-              </span>
-            </div>
 
             <Btn onClick={handleFill} disabled={filling}>
               {filling ? 'Rellenando plantilla...' : '⬇ Generar Excel para ML'}
             </Btn>
+
+            {fillResumen && (
+              <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Encabezado general */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px',
+                  background: fillResumen.faltantes?.length ? '#FFF8E1' : '#E8F5E9',
+                  border: `1px solid ${fillResumen.faltantes?.length ? '#FFE082' : '#A5D6A7'}`,
+                  borderRadius: 'var(--radius-md)',
+                }}>
+                  <span style={{ fontSize: '20px' }}>{fillResumen.faltantes?.length === 0 ? '✅' : '⚠️'}</span>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '13px', fontWeight: '700',
+                      color: fillResumen.faltantes?.length ? '#F57F17' : '#1B5E20' }}>
+                      {fillResumen.publicados?.length} variantes publicadas
+                      {fillResumen.faltantes?.length > 0 && ` · ${fillResumen.faltantes.length} faltantes`}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                      {[...new Set((fillResumen.publicados || []).map(p => p.hoja))].length} hoja(s) en el Excel
+                    </p>
+                  </div>
+                </div>
+
+                {/* Publicados por categoría */}
+                {[...new Set((fillResumen.publicados || []).map(p => p.hoja))].map(hoja => {
+                  const variantes = fillResumen.publicados.filter(p => p.hoja === hoja)
+                  const productos = [...new Map(variantes.map(v => [v.nombre, v])).values()]
+                  return (
+                    <div key={hoja} style={{
+                      border: '1px solid #A5D6A7', borderRadius: 'var(--radius-md)', overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        background: '#E8F5E9', padding: '8px 14px',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      }}>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#1B5E20' }}>
+                          ✅ {hoja}
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#2E7D52' }}>
+                          {productos.length} producto(s) · {variantes.length} variante(s)
+                        </span>
+                      </div>
+                      <div style={{ background: '#fff', padding: '8px 14px' }}>
+                        {productos.map((prod, i) => {
+                          const claves = variantes.filter(v => v.nombre === prod.nombre).map(v => v.clave)
+                          return (
+                            <div key={i} style={{
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              padding: '4px 0', borderBottom: i < productos.length - 1 ? '1px solid #F0F0F0' : 'none',
+                            }}>
+                              <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{prod.nombre}</span>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                {claves.map(c => (
+                                  <span key={c} style={{
+                                    fontSize: '10px', fontFamily: 'monospace', fontWeight: '600',
+                                    background: '#E8F5E9', color: '#2E7D52',
+                                    padding: '1px 6px', borderRadius: 3,
+                                  }}>{c}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Faltantes */}
+                {fillResumen.faltantes?.length > 0 && (
+                  <div style={{ border: '1px solid #FFCC80', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                    <div style={{ background: '#FFF3E0', padding: '8px 14px', display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#E65100' }}>
+                        ❌ No publicados — hoja faltante en la plantilla
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#BF360C' }}>
+                        {fillResumen.faltantes.length} variante(s)
+                      </span>
+                    </div>
+                    <div style={{ background: '#fff', padding: '8px 14px' }}>
+                      {[...new Set(fillResumen.faltantes.map(f => f.categoria_ml))].map(cat => {
+                        const items = fillResumen.faltantes.filter(f => f.categoria_ml === cat)
+                        const prods = [...new Map(items.map(f => [f.nombre, f])).values()]
+                        return (
+                          <div key={cat} style={{ marginBottom: 10 }}>
+                            <p style={{ fontSize: '11px', fontWeight: '700', color: '#E65100', margin: '0 0 4px' }}>
+                              Categoría "{cat}" — agrégala en el Paso 2
+                            </p>
+                            {prods.map((prod, i) => {
+                              const claves = items.filter(f => f.nombre === prod.nombre).map(f => f.clave)
+                              return (
+                                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0 3px 12px' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>• {prod.nombre}</span>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    {claves.map(c => (
+                                      <span key={c} style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: '600', background: '#FFF3E0', color: '#E65100', padding: '1px 6px', borderRadius: 3 }}>{c}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
+                      <p style={{ fontSize: '11px', color: '#BF360C', marginTop: 6, fontStyle: 'italic', borderTop: '1px solid #FFE082', paddingTop: 8 }}>
+                        Vuelve al Paso 2 y agrega: "{[...new Set(fillResumen.faltantes.map(f => f.categoria_ml))].join('", "')}"
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

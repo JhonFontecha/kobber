@@ -4,6 +4,7 @@ import io
 import json
 import re
 import ssl
+import time
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -64,69 +65,114 @@ def get_ml_category(nombre: str, reintentos: int = 3) -> str | None:
 # ── Mejora de descripción con Claude ──────────────────────────────────────────
 
 ENHANCE_PROMPT = """\
-Eres experto en catálogos de ferretería y herramientas para MercadoLibre Colombia.
-Tu tarea es generar una descripción optimizada y sugerir atributos faltantes
+Eres experto en catalogo de ferreteria y herramientas para MercadoLibre Colombia.
+Tu tarea es generar una descripcion optimizada y sugerir atributos faltantes
 para el siguiente producto de la marca {marca}.
 
-════════════════════════════════════════
 DATOS DEL PRODUCTO
-════════════════════════════════════════
 Nombre: {nombre}
-Categoría: {categoria}
+Categoria: {categoria}
 Marca: {marca}
 Variantes disponibles: {variantes}
-Descripción actual: {descripcion_actual}
-Características extraídas: {caracteristicas}
+Descripcion actual: {descripcion_actual}
+Caracteristicas extraidas: {caracteristicas}
 Atributos ya registrados: {atributos}
 
-════════════════════════════════════════
-FORMATO UNIVERSAL PARA LA DESCRIPCIÓN
-════════════════════════════════════════
-Usa EXACTAMENTE este formato. Incluye solo las secciones que apliquen al producto.
-Máximo 500 palabras. Sin HTML. Texto plano con los símbolos indicados.
+FORMATO EXACTO PARA LA DESCRIPCION
+Sigue este formato EXACTAMENTE. Sin HTML. Sin simbolos especiales (nada de asteriscos,
+guiones decorativos, emojis, virgulillas, ni caracteres que no sean letras, numeros,
+puntuacion basica o acentos normales del espanol). Texto plano 100% compatible con
+MercadoLibre Colombia.
 
-[Una frase de apertura: qué es el producto + principal beneficio o uso]
+Estructura obligatoria (copia literalmente los encabezados):
 
-✦ Características principales:
-• [característica 1]
-• [característica 2]
-• [característica 3]
-• [característica 4 si aplica]
-• [característica 5 si aplica]
+Somos Kobber, tu aliado en ferreteria y herramientas de alta calidad. Distribuimos las mejores marcas del mercado, comprometidos con ofrecerte productos confiables, duraderos y al mejor precio. Trabajamos para satisfacer las necesidades de profesionales, contratistas y aficionados en toda Colombia.
 
-✦ Especificaciones técnicas:
-• [atributo]: [valor con unidad]
-• [atributo]: [valor con unidad]
-(incluye solo specs relevantes: medidas, materiales, capacidad, potencia, etc.)
+Nombre: [nombre comercial completo del producto]
+Marca: {marca}
+Descripcion: [Una oracion con funcion principal y beneficio clave. Si hay varias
+             variantes de tamano, agrega "disponible en varias medidas".]
+Caracteristicas principales: [Lista separada por comas, sin guiones ni puntos]
+Serie o linea: [nombre de la linea/serie si aplica, o el tipo de producto]
 
-✦ Aplicaciones recomendadas:
-• [uso o superficie 1]
-• [uso o superficie 2]
-• [uso o superficie 3]
+Caracteristicas
+[Atributo 1]: [valor con unidad]
+[Atributo 2]: [valor con unidad]
+[Atributo 3]: [valor con unidad]
+(incluye material, medidas, capacidad, potencia, norma; minimo 5 atributos)
 
-✦ Incluye: [lista si tiene accesorios o piezas, omitir si no aplica]
+[Parrafo ampliado: describe usos, aplicaciones y detalles tecnicos relevantes
+ en 2-4 oraciones. Menciona donde se usa, para quien es ideal y que lo diferencia.]
 
-✦ Compatibilidad: [si aplica para consumibles o accesorios, omitir si no aplica]
+[Especificaciones tecnicas en formato clave: valor, una por linea]
+Aplicaciones: [lista de aplicaciones separadas por coma — minimo 6]
 
-════════════════════════════════════════
 INSTRUCCIONES ADICIONALES
-════════════════════════════════════════
-1. Usa tu conocimiento de los productos Truper/Pretul/FIERO para complementar información.
-2. Sé preciso con medidas y materiales — no inventes datos que no puedas confirmar.
-3. Usa terminología colombiana.
-4. Optimiza para búsquedas en MercadoLibre Colombia.
-5. Si hay varias variantes, menciona que "disponible en varias medidas".
+1. Usa tu conocimiento de los productos Truper/Pretul/FIERO para completar informacion.
+2. Se preciso con medidas y materiales; no inventes datos que no puedas confirmar.
+3. NUNCA menciones "garantia de por vida", "garantia de fabrica" ni ningun tipo de garantia
+   a menos que el dato venga explicitamente en los atributos o caracteristicas del producto.
+4. Usa terminologia colombiana de ferreteria.
+5. Optimiza para busquedas en MercadoLibre Colombia.
+5. COLOR: Revisa los atributos registrados. Si YA existe un atributo "color", NO lo modifiques.
+   Si NO existe, agregalo en atributos_sugeridos usando tu conocimiento visual del producto.
+   FORMATO OBLIGATORIO: "Color1/Color2" (cuerpo / empunadura o accesorio).
+   Ejemplos correctos: "Plateado/Naranja", "Negro/Rojo", "Amarillo/Negro"
+   Formato: {{"nombre": "color", "valor": "Color1/Color2", "unidad": null}}
 
-Responde ÚNICAMENTE con este JSON (sin markdown):
+TITULOS PARA MERCADOLIBRE COLOMBIA
+Genera 4 titulos. Cada uno debe usar un sinonimo distinto como primera palabra
+para capturar diferentes busquedas del mismo producto.
+
+FORMULA: [Sinonimo] + [Marca] + [Diferenciador clave] + [Medida o material]
+
+REGLAS:
+1. LIMITE ESTRICTO: maximo 60 caracteres por titulo, espacios incluidos.
+   ANTES de escribir cada titulo, cuenta sus caracteres. Si supera 60, elimina
+   palabras del final hasta que quede en 60 o menos. NUNCA entregues un titulo
+   de mas de 60 caracteres.
+2. El primer termino de cada titulo debe ser un sinonimo diferente del producto
+   (ej: alicate / pinzas / tenaza / cortador / pela-cable / ponchador).
+3. Incluye la marca ({marca}) en todos los titulos.
+4. Incluye el diferenciador mas relevante: material, tamano, uso, norma o funcion especial.
+5. No uses articulos (el, la, los, de, para) — ocupan caracteres sin aportar a busquedas.
+6. No repitas el mismo sinonimo en dos titulos.
+7. Si el producto tiene variantes de tamano, elige la mas representativa o usa "Varias Medidas".
+8. Usa terminologia colombiana de ferreteria.
+9. Sin acentos ni tildes en los titulos (ML los indexa mejor sin ellos).
+
+EJEMPLO para un alicate de electricista 9 pulgadas cromo vanadio Trupper:
+  "Alicate Electricista Trupper 9 Cromo Vanadio"   46 chars OK
+  "Pinzas Electricista Trupper Alta Palanca Cr-V"   45 chars OK
+  "Tenaza Electricista Trupper 9 Acero Garantia"    45 chars OK
+  "Cortador Cable Trupper Alta Palanca Norma ASME"  46 chars OK
+
+Responde UNICAMENTE con este JSON (sin markdown):
 {{
   "descripcion": "...",
   "atributos_sugeridos": [
     {{"nombre": "...", "valor": "...", "unidad": "..."}},
     ...
   ],
-  "titulos_sugeridos": [
-    "título opción 1 (max 60 chars)",
-    "título opción 2 (max 60 chars)"
+  "titulos_por_variante": [
+    {{
+      "clave": "CLAVE-SKU-1",
+      "titulos": [
+        "Sinonimo1 {marca} diferenciador medida-variante1",
+        "Sinonimo2 {marca} diferenciador medida-variante1",
+        "Sinonimo3 {marca} diferenciador medida-variante1",
+        "Sinonimo4 {marca} diferenciador medida-variante1"
+      ]
+    }},
+    {{
+      "clave": "CLAVE-SKU-2",
+      "titulos": [
+        "Sinonimo1 {marca} diferenciador medida-variante2",
+        "Sinonimo2 {marca} diferenciador medida-variante2",
+        "Sinonimo3 {marca} diferenciador medida-variante2",
+        "Sinonimo4 {marca} diferenciador medida-variante2"
+      ]
+    }}
   ]
 }}
 """
@@ -145,9 +191,10 @@ def enhance_product_data(
     Llama a Claude para generar una descripción mejorada y sugerir atributos.
     Retorna {descripcion, atributos_sugeridos, titulos_sugeridos}.
     """
-    variantes_str  = " | ".join(
-        f"{v.get('clave','')}: {v.get('descripcion','')}" for v in variantes
-    )
+    variantes_str = "\n".join(
+        f"  - Clave: {v.get('clave','(sin clave)')} | Descripción: {v.get('descripcion','')}"
+        for v in variantes
+    ) or "  - una variante sin clave"
     atributos_str  = " | ".join(
         f"{a.get('nombre','')}: {a.get('valor','')} {a.get('unidad','') or ''}".strip()
         for a in atributos
@@ -166,7 +213,7 @@ def enhance_product_data(
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     msg    = client.messages.create(
         model      = "claude-haiku-4-5-20251001",
-        max_tokens = 1200,
+        max_tokens = 4096,
         messages   = [{"role": "user", "content": prompt}],
     )
 
@@ -178,16 +225,99 @@ def enhance_product_data(
     try:
         return json.loads(raw)
     except Exception:
-        return {"descripcion": descripcion_actual, "atributos_sugeridos": [], "titulos_sugeridos": []}
+        return {"descripcion": descripcion_actual, "atributos_sugeridos": [], "titulos_por_variante": []}
+
+
+_ENHANCE_SEM = asyncio.Semaphore(5)   # máximo 5 llamadas Claude simultáneas
+
+
+async def _enhance_one(p: dict, page_num: int | None = None) -> None:
+    """Mejora descripción y títulos de un producto. Modifica el dict en-place."""
+    if page_num is not None:
+        p["pagina_catalogo"] = p.get("pagina_catalogo") or page_num
+    all_attrs = list(p.get("atributos", []))
+    for v in p.get("variantes", []):
+        all_attrs.extend(v.get("atributos", []))
+    async with _ENHANCE_SEM:
+        enhanced = await asyncio.to_thread(
+            enhance_product_data_safe,
+            p.get("nombre", ""), p.get("marca", "TRUPPER"),
+            p.get("categoria", ""), p.get("variantes", []),
+            p.get("descripcion", ""), p.get("caracteristicas", []), all_attrs,
+        )
+    if enhanced.get("descripcion"):
+        p["descripcion"] = enhanced["descripcion"]
+    titulos_raw = enhanced.get("titulos_por_variante") or []
+    p["titulos_por_variante"] = _truncar_titulos(titulos_raw)
+    if enhanced.get("atributos_sugeridos"):
+        p["atributos_sugeridos"] = enhanced["atributos_sugeridos"]
+
+
+def _truncar_titulos(titulos_por_variante, max_chars: int = 60) -> list:
+    if not titulos_por_variante:
+        return []
+    resultado = []
+    for item in titulos_por_variante:
+        titulos_ok = []
+        for t in item.get("titulos", []):
+            if len(t) <= max_chars:
+                titulos_ok.append(t)
+            else:
+                titulos_ok.append(t[:max_chars].rsplit(" ", 1)[0])
+        resultado.append({"clave": item.get("clave", ""), "titulos": titulos_ok})
+    return resultado
 
 
 def enhance_product_data_safe(nombre, marca, categoria, variantes, descripcion_actual, caracteristicas, atributos) -> dict:
-    """Versión segura — si Claude falla retorna la descripción original sin lanzar excepción."""
-    try:
-        return enhance_product_data(nombre, marca, categoria, variantes, descripcion_actual, caracteristicas, atributos)
-    except Exception as e:
-        print(f"[enhance] Fallo para '{nombre}': {e} — usando descripción original")
-        return {"descripcion": descripcion_actual, "atributos_sugeridos": [], "titulos_sugeridos": []}
+    """
+    Versión segura con dos intentos.
+    - Siempre guarda la mejor descripción obtenida (aunque los títulos fallen).
+    - Reintenta una vez si titulos_por_variante viene vacío o null.
+    """
+    best = {"descripcion": descripcion_actual, "atributos_sugeridos": [], "titulos_por_variante": []}
+
+    for intento in range(2):
+        try:
+            result = enhance_product_data(nombre, marca, categoria, variantes, descripcion_actual, caracteristicas, atributos)
+
+            # Siempre conservar la mejor descripción disponible
+            if result.get("descripcion"):
+                best["descripcion"] = result["descripcion"]
+            if result.get("atributos_sugeridos"):
+                best["atributos_sugeridos"] = result["atributos_sugeridos"]
+
+            if result.get("titulos_por_variante"):
+                best["titulos_por_variante"] = result["titulos_por_variante"]
+                return best  # Tenemos todo — salir
+
+            if intento == 0:
+                print(f"[enhance] titulos_por_variante vacío para '{nombre}' — reintentando")
+
+        except Exception as e:
+            print(f"[enhance] Fallo para '{nombre}' (intento {intento+1}): {e}")
+
+    return best  # Devuelve lo mejor que se pudo obtener
+
+
+def _explode_variants(product: dict) -> list[dict]:
+    """
+    Convierte un producto con N variantes en N productos independientes,
+    cada uno con una sola variante. El nombre lleva la descripción de la variante.
+    """
+    variantes = product.get("variantes") or []
+    if len(variantes) <= 1:
+        return [product]
+
+    nombre_base = (product.get("nombre") or "").strip()
+    base        = {k: v for k, v in product.items() if k != "variantes"}
+
+    result = []
+    for v in variantes:
+        desc   = (v.get("descripcion") or "").strip()
+        nombre = f"{nombre_base} {desc}".strip() if desc else nombre_base
+        result.append({**base, "nombre": nombre, "variantes": [v]})
+
+    return result
 
 
 EXTRACTION_PROMPT = """Eres un experto en catálogos de herramientas Trupper. Tu tarea es extraer TODOS los productos visibles en esta página con máxima precisión, especialmente en los precios.
@@ -210,31 +340,62 @@ REGLAS CRÍTICAS PARA PRECIOS — LEE ESTO PRIMERO
    NC es un número pequeño (1, 2, 3) que indica la cantidad de piezas del empaque retail.
    precio_distribuidor y nc son campos DISTINTOS. NUNCA pongas el valor NC en precio_distribuidor.
 
-4. CADA VARIANTE TIENE SU PROPIO PRECIO.
+4. CADA FILA TIENE SU PROPIO PRECIO.
    Lee el precio fila por fila. No copies el precio de una fila a otra.
    Si una fila no tiene precio visible, usa null — no inventes ni promedies.
 
 5. ANTES DE ESCRIBIR EL JSON, VERIFICA:
-   ¿El precio_distribuidor de cada variante corresponde exactamente a lo que dice
-   la columna "Distribuidor" en esa misma fila? Si no coincide, corrígelo.
+   ¿El precio_distribuidor de cada producto corresponde exactamente a lo que dice
+   la columna "Distribuidor" en esa fila? Si no coincide, corrígelo.
+
+6. CLAVES Y CÓDIGOS SKU — LECTURA EXACTA DE CARACTERES:
+   Los códigos como "T210-9X", "CIA-15N", "PEX-12" mezclan letras y números.
+   Presta especial atención a estos caracteres fáciles de confundir:
+   - La letra "I" (mayúscula) vs el número "1" (uno) vs la letra "l" (ele minúscula)
+   - La letra "O" (mayúscula) vs el número "0" (cero)
+   - La letra "X" vs el número "×" o el símbolo "x"
+   - La letra "S" vs el número "5"
+   - La letra "Z" vs el número "2"
+   Copia el código EXACTAMENTE como aparece en el catálogo, carácter por carácter.
+   NUNCA adivines ni normalices un código — si dice "9X", escribe "9X", no "9I" ni "91".
+
+════════════════════════════════════════
+ORIENTACIÓN DEL CUADRO DE PRECIOS
+════════════════════════════════════════
+
+El cuadro de precios puede venir en dos orientaciones:
+
+A) FILAS: cada fila es un SKU distinto (lo más común).
+   Código | Clave  | Descripción  | Precio | NC | Caja | Máster
+   12345  | T200-6 | 6" (15 cm)   | 18000  |  2 |   12 |    48
+   12346  | T200-7 | 7" (18 cm)   | 21000  |  2 |   12 |    48
+
+B) COLUMNAS: cada columna es un SKU distinto.
+   Atributo | SKU 1   | SKU 2   | SKU 3
+   Código   | 12345   | 12346   | 12347
+   Clave    | T200-6  | T200-7  | T200-8
+   Precio   | 18000   | 21000   | 25000
+
+En ambos casos extrae todos los SKU como entradas del array "variantes".
 
 ════════════════════════════════════════
 ESTRUCTURA A EXTRAER
 ════════════════════════════════════════
 
 Para cada familia de producto devuelve:
-- nombre: nombre completo de la familia (ej: "Cintas antideslizantes negras, en rollo")
+- nombre: nombre completo de la familia (ej: "Alicates de electricista con jalacables")
 - descripcion: descripción larga con usos y características técnicas
 - marca: "TRUPPER" o "PRETUL" según sea visible, o null
-- categoria: categoría principal (ej: "Cintas antideslizantes")
-- subcategoria: subcategoría si existe (ej: "con abrasivo y advertencia"), o null
+- categoria: categoría principal (ej: "Alicates")
+- subcategoria: subcategoría si existe, o null
 - seccion: letra de sección visible en la página (ej: "C", "E", "J", "L"), o null
+- pagina_catalogo: número entero visible en la esquina superior derecha o izquierda (ej: 18, 42). Si no hay número visible, usa null
 - caracteristicas: bullets exactamente como aparecen (ej: ["Adhesivo acrílico", "Resistente al agua"])
 - atributos: atributos que aplican a TODA la familia (no por variante)
   - nombre: clave en minúsculas sin espacios (ej: "grano", "tipo_adhesivo")
   - valor: valor como string
   - unidad: unidad de medida o null
-- variantes: CADA fila del cuadro de precios (una entrada por fila)
+- variantes: CADA fila/columna del cuadro de precios (una entrada por SKU)
   - codigo: código numérico de pedido (ej: "12542"), o null
   - clave: clave/SKU alfanumérico (ej: "CIA-15N"), o null
   - descripcion: descripción de esta variante (ej: "25mm (1\\") Largo 5m")
@@ -244,6 +405,11 @@ Para cada familia de producto devuelve:
   - nc: número entero de la columna NC (1, 2 o 3 típicamente) — NO es precio
   - unidades_caja: número entero de la columna Caja, o null
   - unidades_master: número entero de la columna Máster, o null
+  - color: color del producto identificado VISUALMENTE en la imagen (mira la foto o ilustración del producto).
+            Usa el formato "Color1/Color2" — el color principal del cuerpo y el color de la empuñadura o accesorio.
+            Ejemplos: "Plateado/Naranja", "Amarillo/Negro", "Rojo/Negro", "Plateado/Rojo"
+            NO lo saques del texto escrito — obsérvalos directamente en la imagen del producto.
+            Si no hay imagen visible del producto en la página, usa null.
   - atributos: atributos específicos de esta variante
     - nombre: clave en minúsculas sin espacios (ej: "ancho", "largo", "peso", "presion")
     - valor: valor como string (ej: "25", "5", "1.5")
@@ -253,6 +419,8 @@ Responde ÚNICAMENTE con JSON válido, sin texto antes ni después:
 {"productos": []}"""
 
 
+ACCEPTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
 def _page_to_jpeg_bytes(page, max_width: int = 1400) -> bytes:
     img_obj = page.images[0] if page.images else None
     if img_obj:
@@ -260,7 +428,7 @@ def _page_to_jpeg_bytes(page, max_width: int = 1400) -> bytes:
         raw = img_obj["stream"].get_data()
         img = Image.frombytes("RGB", (w, h), raw)
     else:
-        img = page.to_image(resolution=150).original
+        img = page.to_image(resolution=100).original
 
     if img.width > max_width:
         ratio = max_width / img.width
@@ -271,11 +439,32 @@ def _page_to_jpeg_bytes(page, max_width: int = 1400) -> bytes:
     return buf.getvalue()
 
 
+def _page_from_filename(filename: str) -> int | None:
+    m = re.search(r'(?:p(?:ag(?:ina)?)?[_\-\s]?)(\d+)', filename.lower())
+    return int(m.group(1)) if m else None
+
+
+def _image_file_to_jpeg_bytes(image_bytes: bytes, max_width: int = 1400) -> bytes:
+    img = Image.open(io.BytesIO(image_bytes))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    if img.width > max_width:
+        ratio = max_width / img.width
+        img = img.resize((max_width, int(img.height * ratio)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
+
+
 def _extract_json(text: str) -> dict:
     text = text.strip()
-    match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-    if match:
-        text = match.group(1)
+    # Quitar apertura de bloque de código si existe (con o sin cierre)
+    if text.startswith("```"):
+        # Saltar la primera línea (```json o ```)
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        # Quitar cierre si está presente
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].rstrip()
     return json.loads(text)
 
 
@@ -284,16 +473,20 @@ def _call_claude(image_bytes: bytes) -> list[dict]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     response = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=8192,
+        model="claude-sonnet-4-6",
+        max_tokens=16384,
         messages=[{
             "role": "user",
             "content": [
                 {
+                    "type": "text",
+                    "text": EXTRACTION_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {
                     "type": "image",
                     "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64},
                 },
-                {"type": "text", "text": EXTRACTION_PROMPT},
             ],
         }],
     )
@@ -366,12 +559,28 @@ def _save_to_supabase(products_data: list) -> dict:
                 for a in attrs_to_insert
             ]).execute()
 
+        atributos_sugeridos = p.get("atributos_sugeridos", [])
+        if atributos_sugeridos:
+            db.table("product_attributes").insert([
+                {"product_id": product_id, "variant_id": None,
+                 "nombre": a["nombre"], "valor": a["valor"], "unidad": a.get("unidad")}
+                for a in atributos_sugeridos
+            ]).execute()
+
+        # Índice clave → titulos para lookup O(1)
+        titulos_idx = {
+            item["clave"]: item["titulos"]
+            for item in p.get("titulos_por_variante", [])
+            if item.get("clave")
+        }
+
         # Variantes y sus atributos
         for v in variantes:
+            clave = v.get("clave")
             vresult = db.table("product_variants").insert({
                 "product_id":          product_id,
                 "codigo":              v.get("codigo"),
-                "clave":               v.get("clave"),
+                "clave":               clave,
                 "descripcion":         v.get("descripcion"),
                 "precio_distribuidor": v.get("precio_distribuidor"),
                 "nc":                  v.get("nc"),
@@ -379,11 +588,17 @@ def _save_to_supabase(products_data: list) -> dict:
                 "unidades_master":     v.get("unidades_master"),
                 "stock":               0,
                 "estado":              "activo",
+                "titulos_sugeridos":   titulos_idx.get(clave, []),
             }).execute()
             variant_id = vresult.data[0]["id"]
             saved_variants += 1
 
-            variant_attrs = v.get("atributos", [])
+            variant_attrs = list(v.get("atributos", []))
+
+            # Si el catálogo incluyó color en la variante, agregarlo como atributo
+            if v.get("color"):
+                variant_attrs.append({"nombre": "color", "valor": v["color"], "unidad": None})
+
             if variant_attrs:
                 db.table("product_attributes").insert([
                     {"product_id": product_id, "variant_id": variant_id,
@@ -431,16 +646,53 @@ def _sse(data: dict) -> str:
 
 @router.post("/extract")
 async def extract_catalog(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
-
     if not ANTHROPIC_API_KEY:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY no configurada en el .env")
 
-    pdf_bytes = await file.read()
+    filename = file.filename.lower()
+    ext = "." + filename.rsplit(".", 1)[-1] if "." in filename else ""
+    is_image = ext in ACCEPTED_IMAGE_EXTENSIONS
+    is_pdf = ext == ".pdf"
 
+    if not is_image and not is_pdf:
+        raise HTTPException(status_code=400, detail="Se aceptan PDF, JPG, PNG o WEBP")
+
+    file_bytes = await file.read()
+
+    # ── Flujo imagen ──────────────────────────────────────────────────────────
+    if is_image:
+        page_num_from_file = _page_from_filename(file.filename)
+
+        async def generate_from_image():
+            yield _sse({"type": "start", "total": 1})
+            try:
+                img_bytes = await asyncio.to_thread(_image_file_to_jpeg_bytes, file_bytes)
+                products = await asyncio.to_thread(_call_claude, img_bytes)
+
+                page_fallback = page_num_from_file or 1
+                for p in products:
+                    p["pagina_catalogo"] = p.get("pagina_catalogo") or page_fallback
+
+                await asyncio.gather(*[_enhance_one(p) for p in products])
+
+                yield _sse({"type": "progress", "page": 1, "total": 1,
+                            "page_found": len(products), "total_found": len(products)})
+                yield _sse({"type": "done", "total_paginas": 1,
+                            "total_productos": len(products), "productos": products, "errores": []})
+            except Exception as e:
+                yield _sse({"type": "page_error", "page": 1, "error": str(e)})
+                yield _sse({"type": "done", "total_paginas": 1,
+                            "total_productos": 0, "productos": [], "errores": [{"pagina": 1, "error": str(e)}]})
+
+        return StreamingResponse(
+            generate_from_image(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # ── Flujo PDF ─────────────────────────────────────────────────────────────
     try:
-        pdf = pdfplumber.open(io.BytesIO(pdf_bytes))
+        pdf = pdfplumber.open(io.BytesIO(file_bytes))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"No se pudo leer el PDF: {e}")
 
@@ -459,28 +711,14 @@ async def extract_catalog(file: UploadFile = File(...)):
 
         for i, page in enumerate(pdf.pages):
             page_num = i + 1
+            t_start = time.time()
             try:
                 img_bytes = _page_to_jpeg_bytes(page)
                 products = await asyncio.to_thread(_call_claude, img_bytes)
 
-                # Mejorar descripción de cada producto extraído antes de mostrarlo
                 for p in products:
-                    p["pagina_catalogo"] = page_num
-                    all_attrs = list(p.get("atributos", []))
-                    for v in p.get("variantes", []):
-                        all_attrs.extend(v.get("atributos", []))
-                    enhanced = await asyncio.to_thread(
-                        enhance_product_data_safe,
-                        p.get("nombre", ""),
-                        p.get("marca", "TRUPER"),
-                        p.get("categoria", ""),
-                        p.get("variantes", []),
-                        p.get("descripcion", ""),
-                        p.get("caracteristicas", []),
-                        all_attrs,
-                    )
-                    if enhanced.get("descripcion"):
-                        p["descripcion"] = enhanced["descripcion"]
+                    p["pagina_catalogo"] = p.get("pagina_catalogo") or page_num
+                await asyncio.gather(*[_enhance_one(p) for p in products])
 
                 all_products.extend(products)
                 yield _sse({
@@ -489,13 +727,16 @@ async def extract_catalog(file: UploadFile = File(...)):
                     "total":       total_pages,
                     "page_found":  len(products),
                     "total_found": len(all_products),
+                    "elapsed_s":   round(time.time() - t_start, 1),
                 })
             except json.JSONDecodeError as e:
                 errors.append({"pagina": page_num, "error": f"No se pudo parsear JSON: {e}"})
-                yield _sse({"type": "page_error", "page": page_num, "error": str(e)})
+                yield _sse({"type": "page_error", "page": page_num, "error": str(e),
+                            "elapsed_s": round(time.time() - t_start, 1)})
             except Exception as e:
                 errors.append({"pagina": page_num, "error": str(e)})
-                yield _sse({"type": "page_error", "page": page_num, "error": str(e)})
+                yield _sse({"type": "page_error", "page": page_num, "error": str(e),
+                            "elapsed_s": round(time.time() - t_start, 1)})
 
         yield _sse({
             "type":            "done",

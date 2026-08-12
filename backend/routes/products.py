@@ -1,13 +1,16 @@
+import asyncio
 import io
+import json
 import time
 from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_client
-from routes.catalog import enhance_product_data, get_ml_category
+from routes.catalog import enhance_product_data_safe, enhance_product_data, get_ml_category
 
 router = APIRouter()
 
@@ -89,6 +92,24 @@ _SELECT = (
     "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
     "nc, unidades_caja, stock, estado), product_images(url, orden)"
 )
+
+
+@router.get("/by-page")
+def search_by_page(pagina: int, porcentaje: float = 30):
+    db = get_client()
+    result = db.table("products").select(_SELECT).eq("pagina_catalogo", pagina).execute()
+    products = result.data
+
+    # Añadir porcentaje a cada variante para compatibilidad con el flujo del Publicador
+    for p in products:
+        for v in p.get("product_variants", []):
+            v["porcentaje"] = porcentaje
+
+    return {
+        "products":     products,
+        "encontrados":  len(products),
+        "no_encontrados": [],
+    }
 
 
 @router.post("/by-codes")
@@ -199,11 +220,18 @@ def search_products(q: Optional[str] = None):
         product_ids.add(p["id"])
 
     res2 = db.table("product_variants").select("product_id").or_(
-        f"clave.ilike.%{term}%,codigo.ilike.%{term}%"
+        f"clave.ilike.%{term}%"
     ).execute()
     for v in res2.data:
         if v["product_id"]:
             product_ids.add(v["product_id"])
+
+    # codigo es entero en BD — ilike no aplica; usar eq exacto
+    if term.isdigit():
+        res3 = db.table("product_variants").select("product_id").eq("codigo", int(term)).execute()
+        for v in res3.data:
+            if v["product_id"]:
+                product_ids.add(v["product_id"])
 
     if not product_ids:
         return []
@@ -478,62 +506,56 @@ def store_product(product_id: str, margen: float = 30):
 # ── Mejorar descripción y atributos con Claude ────────────────────────────────
 
 ENHANCE_PROMPT = """\
-Eres experto en catálogos de ferretería y herramientas para MercadoLibre Colombia.
-Tu tarea es generar una descripción optimizada y sugerir atributos faltantes
+Eres experto en catalogo de ferreteria y herramientas para MercadoLibre Colombia.
+Tu tarea es generar una descripcion optimizada y sugerir atributos faltantes
 para el siguiente producto de la marca {marca}.
 
-════════════════════════════════════════
 DATOS DEL PRODUCTO
-════════════════════════════════════════
 Nombre: {nombre}
-Categoría: {categoria}
+Categoria: {categoria}
 Marca: {marca}
 Variantes disponibles: {variantes}
-Descripción actual: {descripcion_actual}
-Características extraídas: {caracteristicas}
+Descripcion actual: {descripcion_actual}
+Caracteristicas extraidas: {caracteristicas}
 Atributos ya registrados: {atributos}
 
-════════════════════════════════════════
-FORMATO UNIVERSAL PARA LA DESCRIPCIÓN
-════════════════════════════════════════
-Usa EXACTAMENTE este formato. Incluye solo las secciones que apliquen al producto.
-Máximo 500 palabras. Sin HTML. Texto plano con los símbolos indicados.
+FORMATO EXACTO PARA LA DESCRIPCION
+Sigue este formato EXACTAMENTE. Sin HTML. Sin simbolos especiales (nada de asteriscos,
+guiones decorativos, emojis, virgulillas, ni caracteres que no sean letras, numeros,
+puntuacion basica o acentos normales del espanol). Texto plano 100% compatible con
+MercadoLibre Colombia.
 
-[Una frase de apertura: qué es el producto + principal beneficio o uso]
+Somos Kobber, tu aliado en ferreteria y herramientas de alta calidad. Distribuimos las mejores marcas del mercado, comprometidos con ofrecerte productos confiables, duraderos y al mejor precio. Trabajamos para satisfacer las necesidades de profesionales, contratistas y aficionados en toda Colombia.
 
-✦ Características principales:
-• [característica 1]
-• [característica 2]
-• [característica 3]
-• [característica 4 si aplica]
-• [característica 5 si aplica]
+Nombre: [nombre comercial completo del producto]
+Marca: {marca}
+Descripcion: [Una oracion con funcion principal y beneficio clave. Si hay varias
+             variantes de tamano, agrega "disponible en varias medidas".]
+Caracteristicas principales: [Lista separada por comas, sin guiones ni puntos]
+Serie o linea: [nombre de la linea/serie si aplica, o el tipo de producto]
 
-✦ Especificaciones técnicas:
-• [atributo]: [valor con unidad]
-• [atributo]: [valor con unidad]
-(incluye solo specs relevantes: medidas, materiales, capacidad, potencia, etc.)
+Caracteristicas
+[Atributo 1]: [valor con unidad]
+[Atributo 2]: [valor con unidad]
+[Atributo 3]: [valor con unidad]
+(incluye material, medidas, capacidad, potencia, norma; minimo 5 atributos)
 
-✦ Aplicaciones recomendadas:
-• [uso o superficie 1]
-• [uso o superficie 2]
-• [uso o superficie 3]
+[Parrafo ampliado: describe usos, aplicaciones y detalles tecnicos relevantes
+ en 2-4 oraciones. Menciona donde se usa, para quien es ideal y que lo diferencia.]
 
-✦ Incluye: [lista si tiene accesorios o piezas, omitir si no aplica]
+[Especificaciones tecnicas en formato clave: valor, una por linea]
+Aplicaciones: [lista de aplicaciones separadas por coma - minimo 6]
 
-✦ Compatibilidad: [si aplica para consumibles o accesorios, omitir si no aplica]
-
-════════════════════════════════════════
 INSTRUCCIONES ADICIONALES
-════════════════════════════════════════
-1. Usa tu conocimiento de los productos Truper/Pretul/FIERO para complementar información.
-2. Sé preciso con medidas y materiales — no inventes datos que no puedas confirmar.
-3. Usa terminología colombiana (ej: "cintas" no "tapes", "llave" no "llave inglesa" si es específica).
-4. Optimiza para búsquedas en MercadoLibre Colombia.
-5. Si hay varias variantes (tallas, medidas), menciona que "disponible en varias medidas".
+1. Usa tu conocimiento de los productos Truper/Pretul/FIERO para complementar informacion.
+2. Se preciso con medidas y materiales; no inventes datos que no puedas confirmar.
+3. NUNCA menciones "garantia de por vida", "garantia de fabrica" ni ningun tipo de garantia
+   a menos que el dato venga explicitamente en los atributos o caracteristicas del producto.
+4. Usa terminologia colombiana de ferreteria.
+5. Optimiza para busquedas en MercadoLibre Colombia.
+6. Si hay varias variantes de tamano, menciona "disponible en varias medidas" en la descripcion.
 
-Además de la descripción, devuelve sugerencias de atributos faltantes en formato JSON.
-
-Responde ÚNICAMENTE con este JSON (sin markdown):
+Responde UNICAMENTE con este JSON (sin markdown):
 {{
   "descripcion": "...",
   "atributos_sugeridos": [
@@ -541,8 +563,8 @@ Responde ÚNICAMENTE con este JSON (sin markdown):
     ...
   ],
   "titulos_sugeridos": [
-    "título opción 1 (max 60 chars)",
-    "título opción 2 (max 60 chars)"
+    "titulo opcion 1 (max 60 chars, sin acentos)",
+    "titulo opcion 2 (max 60 chars, sin acentos)"
   ]
 }}
 """
@@ -587,10 +609,12 @@ async def enhance_product(product_id: str):
         atributos          = familia_attrs + variante_attrs,
     )
 
+    from routes.catalog import _truncar_titulos
+
     return {
-        "descripcion":         data.get("descripcion", ""),
+        "descripcion":        data.get("descripcion", ""),
         "atributos_sugeridos": data.get("atributos_sugeridos", []),
-        "titulos_sugeridos":   data.get("titulos_sugeridos", []),
+        "titulos_por_variante": _truncar_titulos(data.get("titulos_por_variante", [])),
         "producto_id":         product_id,
         "producto_nombre":     p["nombre"],
     }
@@ -623,3 +647,72 @@ def apply_enhance(product_id: str, body: dict):
         ]).execute()
 
     return {"ok": True}
+
+
+# ── Re-generar descripciones de todos los productos ───────────────────────────
+
+@router.post("/redescribe-all")
+async def redescribe_all():
+    """Re-genera la descripción de todos los productos usando el prompt actualizado."""
+    db = get_client()
+
+    products = db.table("products").select(
+        "id, nombre, marca, categoria, descripcion, caracteristicas, "
+        "product_variants(id, clave, descripcion), "
+        "product_attributes(nombre, valor, unidad, variant_id)"
+    ).execute().data
+
+    total = len(products)
+
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    async def generate():
+        updated = 0
+        errors  = 0
+
+        yield _sse({"type": "start", "total": total})
+
+        for i, p in enumerate(products):
+            try:
+                variantes = p.get("product_variants") or []
+                all_attrs = [a for a in (p.get("product_attributes") or [])]
+
+                enhanced = await asyncio.to_thread(
+                    enhance_product_data_safe,
+                    p.get("nombre", ""),
+                    p.get("marca") or "TRUPER",
+                    p.get("categoria") or "",
+                    variantes,
+                    p.get("descripcion") or "",
+                    p.get("caracteristicas") or [],
+                    all_attrs,
+                )
+
+                if enhanced.get("descripcion"):
+                    db.table("products").update({
+                        "descripcion": enhanced["descripcion"]
+                    }).eq("id", p["id"]).execute()
+                    updated += 1
+
+                yield _sse({
+                    "type": "progress", "current": i + 1, "total": total,
+                    "nombre": p.get("nombre", "")[:50],
+                    "updated": updated, "errors": errors,
+                })
+
+            except Exception as e:
+                errors += 1
+                yield _sse({
+                    "type": "progress", "current": i + 1, "total": total,
+                    "nombre": p.get("nombre", "")[:50],
+                    "updated": updated, "errors": errors,
+                })
+
+        yield _sse({"type": "done", "total": total, "updated": updated, "errors": errors})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

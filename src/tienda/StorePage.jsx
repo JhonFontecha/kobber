@@ -5,11 +5,13 @@ import Footer            from './components/Footer'
 import CartDrawer        from './components/CartDrawer'
 import ProductQuickModal from './components/ProductQuickModal'
 import SplashScreen      from './components/SplashScreen'
+import WhatsAppFloat     from './components/WhatsAppFloat'
 import HomePage          from './pages/HomePage'
 import CatalogoPage      from './pages/CatalogoPage'
 import OfertasPage       from './pages/OfertasPage'
 import LoginPage         from './pages/LoginPage'
 import ProductDetailPage from './pages/ProductDetailPage'
+import CheckoutPage      from './pages/CheckoutPage'
 
 const SPLASH_KEY = 'kobber_splash_shown'
 
@@ -41,12 +43,15 @@ export default function StorePage() {
             <Route path="catalogo"     element={<CatalogoPage searchQuery={searchQuery} onQuickView={setQuickId} />} />
             <Route path="ofertas"      element={<OfertasPage  onQuickView={setQuickId} />} />
             <Route path="login"        element={<LoginPage />} />
+            <Route path="checkout"     element={<CheckoutPage />} />
             <Route path="producto/:id" element={<ProductDetailPage />} />
           </Routes>
         </main>
 
         <Footer />
       </div>
+
+      <WhatsAppFloat />
     </>
   )
 }

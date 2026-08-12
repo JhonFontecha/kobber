@@ -141,17 +141,19 @@ def _parse_kobber_file(content: bytes) -> dict:
 
 
 _ML_FIELD_KEYWORDS: dict[str, list[str]] = {
-    "codigo_ml":   ["catálogo ml", "catalogo ml"],
-    "titulo":      ["título"],
-    "ean":         ["código universal", "codigo universal"],
-    "fotos":       ["fotos"],
-    "sku":         ["sku"],
-    "stock":       ["stock"],
-    "precio":      ["precio [$]", "precio"],
-    "descripcion": ["descripción", "descripcion"],
-    "condicion":   ["condición", "condicion"],
-    "marca":       ["marca"],
-    "modelo":      ["modelo"],
+    "codigo_ml":        ["catálogo ml", "catalogo ml"],
+    "titulo":           ["título"],
+    "codigo_universal": ["código universal de producto", "codigo universal de producto"],
+    "fotos":            ["fotos"],
+    "sku":              ["sku"],
+    "stock":            ["stock"],
+    "precio":           ["precio [$]", "precio"],
+    "descripcion":      ["descripción", "descripcion"],
+    "condicion":        ["condición", "condicion"],
+    "marca":            ["marca"],
+    "modelo":           ["modelo"],
+    "costo_envio":      ["costo de envío", "costo de envio"],
+    "retiro_persona":   ["retiro en persona"],
 }
 
 
@@ -958,13 +960,156 @@ async def download_template(body: dict):
     )
 
 
+# ── Login ML via Playwright (sin terminal) ───────────────────────────────────
+
+@router.get("/ml-session-status")
+async def ml_session_status():
+    """Verifica si la sesión ML guardada sigue activa."""
+    import asyncio
+    from playwright.async_api import async_playwright
+
+    SESSION_FILE = "/tmp/ml_session.json"
+
+    if not os.path.exists(SESSION_FILE):
+        return {"active": False, "reason": "no_session"}
+
+    async def check():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            ctx  = await browser.new_context(storage_state=SESSION_FILE)
+            page = await ctx.new_page()
+            await page.goto(
+                "https://www.mercadolibre.com.co/publicar-masivamente/categories",
+                wait_until="domcontentloaded", timeout=20_000,
+            )
+            url = page.url
+            await browser.close()
+            return url
+
+    try:
+        url = await check()
+        if "login" in url or "registration" in url:
+            return {"active": False, "reason": "expired"}
+        return {"active": True, "url": url}
+    except Exception as e:
+        return {"active": False, "reason": str(e)}
+
+
+@router.post("/ml-login")
+async def ml_login():
+    """
+    Abre un browser visible, espera que el usuario haga login en ML
+    y guarda la sesión automáticamente al detectar la página de categorías.
+    """
+    import asyncio
+    from playwright.async_api import async_playwright
+
+    SESSION_FILE = "/tmp/ml_session.json"
+    ML_URL       = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
+
+    async def do_login():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=False, slow_mo=50)
+            ctx     = await browser.new_context()
+            page    = await ctx.new_page()
+            await page.goto(ML_URL)
+
+            # Esperar hasta 3 minutos a que el usuario llegue a la página de categorías
+            await page.wait_for_url("**/publicar-masivamente/categories**", timeout=180_000)
+
+            await ctx.storage_state(path=SESSION_FILE)
+            await browser.close()
+
+    try:
+        await do_login()
+        return {"ok": True, "message": "Sesión guardada correctamente"}
+    except Exception as e:
+        raise HTTPException(500, f"Error al guardar sesión: {e}")
+
+
+# ── Inferencia de atributos faltantes con Claude ──────────────────────────────
+
+ATTR_INFER_PROMPT = """\
+Eres experto en ferreteria y herramientas de las marcas Truper, Pretul y FIERO \
+para MercadoLibre Colombia.
+
+Para cada producto de la lista completa los atributos vacios de la plantilla ML \
+usando tu conocimiento tecnico del producto. Devuelve null para atributos que no \
+apliquen o que no puedas confirmar con certeza. No inventes datos.
+
+Columnas a completar (nombres exactos de la plantilla):
+{attr_names}
+
+Productos (en el mismo orden en que debes responder):
+{products_json}
+
+Responde UNICAMENTE con un JSON array, un objeto por producto, en el mismo orden.
+Cada objeto usa como llaves los nombres exactos de las columnas y como valores \
+los datos inferidos (string) o null.
+Sin markdown, sin explicaciones.
+"""
+
+
+def _fill_attrs_claude(
+    ws,
+    rows: list[dict],
+    attr_cols: dict[str, int],
+    client: anthropic.Anthropic,
+) -> None:
+    """Llena columnas de atributos vacías usando Claude. No sobreescribe celdas con valor."""
+    if not rows or not attr_cols:
+        return
+
+    attr_names = list(attr_cols.keys())
+    BATCH = 8
+
+    for i in range(0, len(rows), BATCH):
+        batch = rows[i : i + BATCH]
+        products_input = [
+            {
+                "nombre":      r["nombre"],
+                "marca":       r["marca"],
+                "categoria":   r["categoria"],
+                "descripcion": r["descripcion"],
+            }
+            for r in batch
+        ]
+        try:
+            prompt = ATTR_INFER_PROMPT.format(
+                attr_names=json.dumps(attr_names, ensure_ascii=False),
+                products_json=json.dumps(products_input, ensure_ascii=False),
+            )
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = msg.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+            inferred: list[dict] = json.loads(raw)
+
+            for row_ctx, attrs in zip(batch, inferred):
+                if not isinstance(attrs, dict):
+                    continue
+                for attr_name, value in attrs.items():
+                    if value is None or str(value).strip().lower() in ("null", "no aplica", ""):
+                        continue
+                    col = attr_cols.get(attr_name)
+                    if col and not ws.cell(row_ctx["row_num"], col).value:
+                        ws.cell(row_ctx["row_num"], col).value = str(value)
+        except Exception as e:
+            print(f"[fill_attrs_claude] batch {i}: {e}")
+
+
 # ── Rellenar plantilla vacía con productos de BD ──────────────────────────────
 
 @router.post("/fill-blank-template")
 async def fill_blank_template(
-    ml_file:     UploadFile = File(...),
-    margen:      float = 0,
-    product_ids: Optional[str] = Form(None),  # JSON array de IDs o None = todos
+    ml_file:        UploadFile = File(...),
+    margen:         float = 0,
+    product_ids:    Optional[str] = Form(None),
+    product_stocks: Optional[str] = Form(None),  # JSON {product_id: stock}
 ):
     """
     Recibe una plantilla vacía de ML (descargada del scraper).
@@ -984,6 +1129,8 @@ async def fill_blank_template(
     if not hojas:
         raise HTTPException(400, "No se encontraron hojas de categorías en el archivo")
 
+    ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
     # Parsear product_ids si se enviaron
     ids_filter: list | None = None
     if product_ids:
@@ -992,13 +1139,21 @@ async def fill_blank_template(
         except Exception:
             ids_filter = [i.strip() for i in product_ids.split(",") if i.strip()]
 
+    # Parsear stocks por producto {product_id: stock}
+    stocks_map: dict = {}
+    if product_stocks:
+        try:
+            stocks_map = json.loads(product_stocks)
+        except Exception:
+            pass
+
     # ── Cargar BD con categoria_ml y atributos ────────────────────────────────
     db = get_client()
     query = db.table("products").select(
         "id, nombre, descripcion, marca, categoria_ml, caracteristicas, "
         "product_attributes(nombre, valor, unidad, variant_id), "
         "product_variants(id, clave, codigo, nc, precio_distribuidor, stock, "
-        "product_attributes(nombre, valor, unidad)), "
+        "titulos_sugeridos, product_attributes(nombre, valor, unidad)), "
         "product_images(url, orden)"
     ).not_.is_("categoria_ml", "null")
 
@@ -1060,6 +1215,22 @@ async def fill_blank_template(
 
         return attr_cols, unit_cols
 
+    # ── Detectar faltantes: productos sin hoja coincidente ────────────────────
+    hojas_set = set(hojas)
+    publicados: list = []   # {nombre, clave, hoja}
+    faltantes:  list = []   # {nombre, clave, categoria_ml, razon}
+
+    for cat, prods in cat_to_products.items():
+        if cat not in hojas_set:
+            for p in prods:
+                for v in (p.get("product_variants") or []):
+                    faltantes.append({
+                        "nombre":       p["nombre"][:60],
+                        "clave":        v.get("clave") or v.get("codigo") or "—",
+                        "categoria_ml": cat,
+                        "razon":        f'Hoja "{cat}" no existe en la plantilla descargada',
+                    })
+
     # ── Rellenar cada hoja ─────────────────────────────────────────────────────
     total_filas = 0
 
@@ -1070,6 +1241,8 @@ async def fill_blank_template(
             continue
 
         attr_cols, unit_cols = _attr_col_maps(ws)
+
+        rows_for_inference: list = []   # filas escritas en esta hoja para inferencia Claude
 
         # Primera fila vacía de datos
         first_empty = 9
@@ -1113,66 +1286,88 @@ async def fill_blank_template(
                     a["nombre"].lower(): a
                     for a in (v.get("product_attributes") or [])
                 }
-                # Fusionar: variante sobreescribe familia
                 all_attrs = {**familia_attrs, **variante_attrs}
 
-                # Escribir valores por defecto de la fila ejemplo
-                for col, val in default_vals.items():
-                    ws.cell(first_empty, col).value = val
+                # Títulos: usar los de BD si existen, si no el título genérico
+                titulos = v.get("titulos_sugeridos") or [titulo_generico]
 
-                # Escribir datos de BD
-                def w(field, val):
-                    if field in cols and val not in (None, ""):
-                        ws.cell(first_empty, cols[field]).value = val
+                # Una fila por cada título de la variante
+                for titulo in titulos:
+                    # Valores por defecto de la fila ejemplo
+                    for col, val in default_vals.items():
+                        ws.cell(first_empty, col).value = val
 
-                # Título igual para todas las variantes (según Ayuda ML)
-                w("titulo",      titulo_generico)
-                w("sku",         clave)
-                w("modelo",      clave)
-                w("marca",       p.get("marca", ""))
-                w("descripcion", p.get("descripcion", ""))
-                w("stock",       v.get("stock") or 0)
-                w("condicion",   "Nuevo")
-                if precio is not None:
-                    w("precio", precio)
-                if nc and nc not in ("", "2"):
-                    w("ean", nc)
-                # Fotos separadas por coma (según Ayuda ML)
-                if "fotos" in cols and fotos_str:
-                    ws.cell(first_empty, cols["fotos"]).value = fotos_str
+                    def w(field, val):
+                        if field in cols and val not in (None, ""):
+                            ws.cell(first_empty, cols[field]).value = val
 
-                # ── Atributos específicos de la categoría ──────────────────
-                for attr_name_l, attr in all_attrs.items():
-                    valor  = str(attr.get("valor") or "").strip()
-                    unidad = str(attr.get("unidad") or "").strip()
+                    w("titulo",           titulo)
+                    w("sku",              clave)
+                    w("modelo",           clave)
+                    w("marca",            p.get("marca", ""))
+                    w("descripcion",      p.get("descripcion", ""))
+                    stock_val = stocks_map.get(str(p["id"]), stocks_map.get(p["id"], 100))
+                    w("stock", int(stock_val) if stock_val is not None else 100)
+                    w("condicion",        "Nuevo")
+                    w("codigo_universal", "Otra razón")
+                    w("costo_envio",      "A cargo del comprador")
+                    w("retiro_persona",   "No acepto")
+                    if precio is not None:
+                        w("precio", precio)
+                    if "fotos" in cols and fotos_str:
+                        ws.cell(first_empty, cols["fotos"]).value = fotos_str
 
-                    if not valor:
-                        continue
+                    # Atributos específicos de la categoría
+                    for attr_name_l, attr in all_attrs.items():
+                        valor  = str(attr.get("valor") or "").strip()
+                        unidad = str(attr.get("unidad") or "").strip()
+                        if not valor:
+                            continue
+                        target_col = attr_cols.get(attr_name_l)
+                        if not target_col:
+                            for col_name, col_num in attr_cols.items():
+                                if attr_name_l in col_name or col_name in attr_name_l:
+                                    target_col = col_num
+                                    break
+                        if target_col:
+                            ws.cell(first_empty, target_col).value = valor
+                            if unidad:
+                                unit_col = unit_cols.get(attr_name_l)
+                                if not unit_col:
+                                    for col_name, col_num in unit_cols.items():
+                                        if attr_name_l in col_name or col_name in attr_name_l:
+                                            unit_col = col_num
+                                            break
+                                if unit_col:
+                                    ws.cell(first_empty, unit_col).value = unidad
 
-                    # Buscar columna de valor por nombre exacto o parcial
-                    target_col = attr_cols.get(attr_name_l)
-                    if not target_col:
-                        # Búsqueda parcial: el nombre del atributo aparece en el header
-                        for col_name, col_num in attr_cols.items():
-                            if attr_name_l in col_name or col_name in attr_name_l:
-                                target_col = col_num
-                                break
+                    rows_for_inference.append({
+                        "row_num":    first_empty,
+                        "nombre":     p.get("nombre", ""),
+                        "marca":      p.get("marca", ""),
+                        "categoria":  p.get("categoria_ml", ""),
+                        "descripcion": (p.get("descripcion") or "")[:300],
+                    })
+                    first_empty += 1
+                    total_filas += 1
 
-                    if target_col:
-                        ws.cell(first_empty, target_col).value = valor
-                        # Buscar columna de unidad asociada
-                        if unidad:
-                            unit_col = unit_cols.get(attr_name_l)
-                            if not unit_col:
-                                for col_name, col_num in unit_cols.items():
-                                    if attr_name_l in col_name or col_name in attr_name_l:
-                                        unit_col = col_num
-                                        break
-                            if unit_col:
-                                ws.cell(first_empty, unit_col).value = unidad
+                publicados.append({
+                    "nombre": p["nombre"][:60],
+                    "clave":  clave,
+                    "hoja":   hoja,
+                })
 
-                first_empty  += 1
-                total_filas  += 1
+                # Fila en blanco separadora entre variantes
+                first_empty += 1
+
+        # Inferir atributos vacíos con Claude para todas las filas de esta hoja
+        _fill_attrs_claude(ws, rows_for_inference, attr_cols, ai_client)
+
+    import base64 as _b64
+    resumen = _b64.b64encode(json.dumps({
+        "publicados": publicados,
+        "faltantes":  faltantes,
+    }, ensure_ascii=False).encode()).decode()
 
     buf = BytesIO()
     wb.save(buf); buf.seek(0)
@@ -1182,8 +1377,12 @@ async def fill_blank_template(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f"attachment; filename={fname}",
-            "X-Filas": str(total_filas),
-            "X-Hojas": str(len(hojas)),
+            "Content-Disposition":    f"attachment; filename={fname}",
+            "X-Filas":                str(total_filas),
+            "X-Hojas":                str(len(hojas)),
+            "X-Publicados":           str(len(publicados)),
+            "X-Faltantes":            str(len(faltantes)),
+            "X-Resumen":              resumen,
+            "Access-Control-Expose-Headers": "X-Filas,X-Hojas,X-Publicados,X-Faltantes,X-Resumen",
         },
     )
