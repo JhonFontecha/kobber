@@ -12,10 +12,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
+        {/* Panel de administrador */}
+        <Route path="/admin/*" element={<App />} />
         {/* Tienda pública */}
         <Route path="/tienda/*" element={<StorePage />} />
-        {/* Herramienta interna Kobber */}
-        <Route path="/*" element={<App />} />
+        {/* Redirige raíz a tienda */}
+        <Route path="/*" element={<StorePage />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

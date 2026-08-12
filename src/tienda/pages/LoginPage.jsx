@@ -1,16 +1,27 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Wrench } from 'lucide-react'
+
+const ADMIN_USER = 'admin@kobber.com'
+const ADMIN_PASS = '1234'
 
 export default function LoginPage() {
   const [mode, setMode]     = useState('login')   // 'login' | 'register'
   const [showPw, setShowPw] = useState(false)
   const [form, setForm]     = useState({ email: '', password: '', nombre: '' })
+  const [error, setError]   = useState('')
+  const navigate            = useNavigate()
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    // TODO: conectar con auth real (Supabase Auth, etc.)
-    console.log('submit', mode, form)
+    setError('')
+    if (mode === 'login') {
+      if (form.email === ADMIN_USER && form.password === ADMIN_PASS) {
+        navigate('/admin')
+      } else {
+        setError('Usuario o contraseña incorrectos.')
+      }
+    }
   }
 
   return (
@@ -98,6 +109,12 @@ export default function LoginPage() {
                 </div>
               )}
             </div>
+
+            {error && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
 
             <button type="submit"
               className="w-full py-3 bg-accent text-white font-semibold rounded-lg

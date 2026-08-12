@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import logo from './assets/logo.png'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -116,6 +117,7 @@ function Sidebar({ active, onChange, stats, open, onToggle }) {
   const childIds = NAV_ITEMS.flatMap(i => (i.children || []).map(c => c.id))
   const activeParent = NAV_ITEMS.find(i => i.children?.some(c => c.id === active))?.id
   const [expanded, setExpanded] = useState(activeParent || null)
+  const navigate = useNavigate()
 
   const handleItemClick = (item) => {
     if (item.children) {
@@ -176,6 +178,27 @@ function Sidebar({ active, onChange, stats, open, onToggle }) {
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', margin: 0 }}>catálogo ML</p>
           </div>
         )}
+      </div>
+
+      {/* Volver a tienda */}
+      <div style={{ padding: open ? '10px 12px' : '10px 0', display: 'flex', justifyContent: open ? 'flex-start' : 'center', borderBottom: '0.5px solid var(--border)' }}>
+        <button
+          onClick={() => navigate('/tienda')}
+          title="Volver a la tienda"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            background: 'none', border: '0.5px solid var(--border)',
+            borderRadius: 'var(--radius-md)', cursor: 'pointer',
+            padding: open ? '6px 10px' : '6px',
+            fontSize: '12px', color: 'var(--text-secondary)',
+            transition: 'color 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+        >
+          <span style={{ fontSize: '14px' }}>←</span>
+          {open && <span>Tienda</span>}
+        </button>
       </div>
 
       {/* Nav */}
