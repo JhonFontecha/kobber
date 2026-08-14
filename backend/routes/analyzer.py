@@ -1010,7 +1010,7 @@ async def ml_session_status():
 
     async def check():
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, channel="chrome")
             ctx  = await browser.new_context(storage_state=SESSION_FILE)
             page = await ctx.new_page()
             await page.goto(
@@ -1044,7 +1044,7 @@ async def ml_login():
 
     async def do_login():
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, slow_mo=50)
+            browser = await p.chromium.launch(headless=False, slow_mo=50, channel="chrome")
             ctx     = await browser.new_context()
             page    = await ctx.new_page()
             await page.goto(ML_URL)

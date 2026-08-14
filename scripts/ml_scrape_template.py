@@ -343,7 +343,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
 print("\n=== PASO 2: Agregando categorías en ML ===")
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False, slow_mo=80)
+    browser = p.chromium.launch(headless=False, slow_mo=80, channel="chrome")
     ctx     = browser.new_context(storage_state=SESSION_FILE, accept_downloads=True)
     page    = ctx.new_page()
 

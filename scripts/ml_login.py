@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 SESSION_FILE = "/tmp/ml_session.json"
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False, slow_mo=100)
+    browser = p.chromium.launch(headless=False, slow_mo=100, channel="chrome")
     ctx     = browser.new_context()
     page    = ctx.new_page()
 

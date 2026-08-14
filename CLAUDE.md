@@ -175,6 +175,31 @@ Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backe
 
 Correr desde la raíz del repo: `backend/venv/bin/python3 scripts/<script>.py`.
 
+## Deploy
+
+El proyecto se corre en **dos lugares distintos a propósito**, no es un descuido:
+
+- **Mac de la empresa (local, siempre)** — el Publicador completo: `main.py` con los 6 routers,
+  Playwright/Chrome para login y scraping de ML, `ANTHROPIC_API_KEY` para Claude Vision/Haiku.
+  Necesita una persona presente para el login interactivo de ML (ver "Problemas conocidos" más
+  abajo) — por eso no tiene sentido moverlo a un servidor.
+- **Servidor (Render, `render.yaml`)** — sólo la tienda pública. Dos servicios separados:
+  - `backend/main_public.py` — mismo `store.py` de siempre, pero **sin** `catalog`/`analyzer`/
+    `images`/`products`/`excel`. No carga `ANTHROPIC_API_KEY` ni toca Playwright — no tiene sentido
+    en un servidor headless (sin pantalla para el login de ML).
+  - Build estático del frontend con `VITE_PUBLIC_ONLY=true`, que hace que `src/main.jsx` ni
+    registre la ruta `/admin/*` (y por `React.lazy`, ni siquiera baja el bundle de `App.jsx`,
+    ~2900 líneas, a los visitantes de la tienda).
+
+Los dos backends comparten la misma base de Supabase (`SUPABASE_URL`/keys) — no hay sincronización
+de datos entre "local" y "servidor", es la misma BD vista desde dos procesos distintos.
+
+**Deploy con el Blueprint:** `render.yaml` en la raíz define ambos servicios de Render. Los nombres
+de servicio (`kobber-store-api`, `kobber-tienda`) determinan la URL — si Render los renombra por
+estar ocupados, hay que actualizar a mano el rewrite `/api/*` del static site (apunta a la URL del
+backend) y `ALLOWED_ORIGINS` del backend (debe incluir la URL del static site). Las credenciales de
+Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
+
 ## Convenciones importantes
 
 - **Separador de fotos**: ML requiere coma (`,`) entre URLs de imagen — no `|`. Todos los endpoints de generación de Excel usan `",".join(urls)`.
@@ -188,5 +213,10 @@ Correr desde la raíz del repo: `backend/venv/bin/python3 scripts/<script>.py`.
 - Endpoints duplicados `/api/products/tienda*` vs `/api/store/productos*` (ver arriba) — limpiar cuando se toque `products.py` o `store.py`.
 - Login de tienda (`LoginPage.jsx`) no es autenticación real — credenciales hardcodeadas en el frontend, visibles en el bundle. No usar para proteger nada sensible sin reemplazarlo primero.
 - `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
-- `playwright` (usado por `scripts/ml_*.py`) **no está en `requirements.txt`** — hay que instalarlo aparte (`pip install playwright`). En macOS 13 (Ventura), `playwright install chromium` falla porque Playwright dejó de dar soporte a Chromium en ese OS — usar `p.chromium.launch(channel="chrome")` para lanzar el Chrome del sistema en vez de descargar el binario propio de Playwright.
+- `playwright` está en `requirements.txt`. En macOS 13 (Ventura) `playwright install chromium` **falla** —
+  Playwright dejó de dar soporte a Chromium en ese OS — por eso todos los `chromium.launch(...)` del
+  proyecto (`analyzer.py` x2, `scripts/ml_login.py`, `ml_scrape_template.py`, `ml_inspect.py`) pasan
+  `channel="chrome"` para usar el Google Chrome del sistema en vez del binario propio de Playwright.
+  Requiere tener Chrome instalado — si no está, instalarlo desde google.com/chrome, no correr
+  `playwright install`.
 - El servidor de búsqueda pública de ML (`api.mercadolibre.com/sites/MCO/search` y `/products/search`) ahora devuelve 403 (`PolicyAgent`, firewall anti-bot) para requests sin sesión — incluso navegando con un browser real headless. Sólo `domain_discovery` (usado por `get_ml_category`) sigue público. Cualquier feature que necesite traer resultados de búsqueda reales de ML requiere sesión logueada vía Playwright (`ml_login.py`) o una app OAuth propia registrada en developers.mercadolibre.com — no hay atajo sin eso.

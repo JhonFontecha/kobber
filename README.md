@@ -11,9 +11,10 @@ es sólo la guía para dejarlo corriendo desde cero.
 - **Node.js 18+** y npm 9+
 - Una **API key de Anthropic** ([console.anthropic.com](https://console.anthropic.com))
 - Un **proyecto de Supabase** (Postgres + Storage) ya creado, con la URL y las keys a mano
-- (Opcional, sólo para los scripts de `scripts/ml_*.py`) **Google Chrome** instalado — Playwright
-  lo usa directamente en vez de descargar su propio Chromium, porque en macOS 13 (Ventura)
-  `playwright install chromium` falla por falta de soporte de esa versión de Playwright a ese OS
+- **Google Chrome** instalado (necesario para el publicador ML y los scripts de `scripts/ml_*.py`) —
+  Playwright usa el Chrome del sistema directamente en vez de descargar su propio Chromium, porque
+  en macOS 13 (Ventura) `playwright install chromium` falla por falta de soporte de esa versión de
+  Playwright a ese OS. No hace falta correr `playwright install`.
 
 ## Puesta en marcha desde cero (clonar en una Mac nueva)
 
@@ -40,15 +41,17 @@ desde qué carpeta corras los comandos.
 npm install
 ```
 
-### 3. (Opcional) Scripts de automatización de MercadoLibre
+### 3. Sesión de MercadoLibre (para publicar/renovar plantillas)
 
-Sólo si vas a usar `scripts/ml_login.py` / `ml_scrape_template.py` (no están en `requirements.txt`
-porque no los usa el backend, sólo se corren manualmente):
+`playwright` ya se instaló con `requirements.txt` — sólo falta crear la sesión guardada corriendo
+esto una vez (abre un Chrome real para que te loguees a mano):
 
 ```bash
-backend/venv/bin/pip install playwright
-backend/venv/bin/python3 scripts/ml_login.py   # abre un browser real para loguearte una vez
+backend/venv/bin/python3 scripts/ml_login.py
 ```
+
+La sesión expira cada tanto — cuando eso pase, correr el mismo comando de nuevo (o usar el botón
+correspondiente en el panel admin, que hace lo mismo desde el backend).
 
 ## Correr en desarrollo
 
@@ -90,3 +93,21 @@ limpio antes de seguir investigando el código.
 ```bash
 npm run build
 ```
+
+## Deploy de la tienda pública (servidor, no la Mac)
+
+El Publicador (panel admin) no se deploya — sigue corriendo sólo local, en la Mac de la empresa
+(necesita Playwright/Chrome y a alguien presente para loguearse en ML). Lo único que se sube a un
+servidor es la **tienda pública**, como dos servicios separados definidos en `render.yaml`
+(backend chico sin Playwright/Claude + frontend estático sin el panel admin) — detalle completo en
+[CLAUDE.md → "Deploy"](./CLAUDE.md#deploy).
+
+Pasos con [Render](https://render.com) (tiene free tier permanente):
+
+1. Crear cuenta en Render y conectar el repo de GitHub.
+2. "New" → "Blueprint" → elegir este repo → Render detecta `render.yaml` automáticamente.
+3. Completar las variables marcadas como secretas en el dashboard (`SUPABASE_URL`, `SUPABASE_KEY`,
+   `SUPABASE_SERVICE_KEY` del servicio `kobber-store-api`) — nunca van en el yaml ni en git.
+4. Deployar. Si Render tuvo que renombrar algún servicio (nombre ocupado), actualizar a mano el
+   rewrite del static site y `ALLOWED_ORIGINS` del backend con las URLs reales (ver nota en
+   `render.yaml`).

@@ -1,0 +1,45 @@
+# Blueprint de Render — deploya sólo la tienda pública (backend chico + frontend estático).
+# El Publicador (panel admin, Playwright, Claude) NO se deploya acá — sigue corriendo en la Mac
+# de la empresa. Ver CLAUDE.md → "Deploy" para el detalle completo.
+#
+# Los nombres de servicio de abajo determinan la URL (https://<name>.onrender.com). Si al crear
+# el Blueprint Render los renombra por estar ocupados, actualizar:
+#   - el "destination" del rewrite del static site con la URL real del web service
+#   - ALLOWED_ORIGINS en el web service con la URL real del static site
+
+services:
+  # Backend — sólo store.py, sin Playwright ni Claude
+  - type: web
+    name: kobber-store-api
+    env: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main_public:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://kobber-tienda.onrender.com,http://localhost:5173
+
+  # Frontend — build estático de la tienda, sin el panel admin
+  - type: web
+    name: kobber-tienda
+    env: static
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_PUBLIC_ONLY
+        value: "true"
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://kobber-store-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
