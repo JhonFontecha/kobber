@@ -536,6 +536,7 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
       const body = {
         descripcion:    applyDesc ? enhanceResult.descripcion : null,
         atributos_nuevos: (enhanceResult.atributos_sugeridos || []).filter((_, i) => applyAttrs.includes(i)),
+        titulos_por_variante: enhanceResult.titulos_por_variante || [],
       }
       const r = await fetch(`/api/products/${p.id}/apply-enhance`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -694,36 +695,10 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
 
           {p.titulos_por_variante?.length > 0 && (
             <EditRow label="Títulos sugeridos para MercadoLibre">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {p.titulos_por_variante.map((item, vi) => (
-                  <div key={vi}>
-                    <div style={{
-                      fontSize: '10px', fontFamily: 'monospace', fontWeight: '700',
-                      color: 'var(--accent)', marginBottom: 4, textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                    }}>
-                      {item.clave || `Variante ${vi + 1}`}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {item.titulos?.map((t, ti) => (
-                        <div key={ti} style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          background: 'var(--bg)', border: '0.5px solid var(--border)',
-                          borderRadius: 6, padding: '5px 10px', gap: 10,
-                        }}>
-                          <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t}</span>
-                          <span style={{
-                            fontSize: '10px', fontWeight: '600', flexShrink: 0,
-                            color: t.length > 55 ? '#f97316' : 'var(--text-tertiary)',
-                          }}>
-                            {t.length}/60
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <EditableTitulos
+                grupos={p.titulos_por_variante}
+                onChange={next => onChange('titulos_por_variante', next)}
+              />
             </EditRow>
           )}
         </div>
@@ -762,17 +737,15 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
           </div>
 
           {/* Títulos sugeridos */}
-          {enhanceResult.titulos_sugeridos?.length > 0 && (
+          {enhanceResult.titulos_por_variante?.length > 0 && (
             <div style={{ marginBottom: 12 }}>
               <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: 6 }}>
-                Títulos sugeridos (referencia):
+                Títulos sugeridos (editables):
               </p>
-              {enhanceResult.titulos_sugeridos.map((t, i) => (
-                <p key={i} style={{ fontSize: '12px', color: 'var(--text-primary)', margin: '0 0 3px',
-                  background: '#fff', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)' }}>
-                  {t}
-                </p>
-              ))}
+              <EditableTitulos
+                grupos={enhanceResult.titulos_por_variante}
+                onChange={next => setEnhanceResult(prev => ({ ...prev, titulos_por_variante: next }))}
+              />
             </div>
           )}
 
@@ -844,6 +817,68 @@ function EditTextarea({ value, onChange, rows = 2 }) {
         fontFamily: 'inherit',
       }}
     />
+  )
+}
+
+// Títulos sugeridos editables, agrupados por variante: [{clave, titulos: [...]}]
+function EditableTitulos({ grupos, onChange }) {
+  const setTitulo = (gi, ti, value) => {
+    onChange(grupos.map((g, i) => i === gi
+      ? { ...g, titulos: g.titulos.map((t, j) => j === ti ? value : t) }
+      : g))
+  }
+  const removeTitulo = (gi, ti) => {
+    onChange(grupos.map((g, i) => i === gi
+      ? { ...g, titulos: g.titulos.filter((_, j) => j !== ti) }
+      : g))
+  }
+  const addTitulo = (gi) => {
+    onChange(grupos.map((g, i) => i === gi ? { ...g, titulos: [...g.titulos, ''] } : g))
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {grupos.map((item, vi) => (
+        <div key={item.clave || vi}>
+          <div style={{
+            fontSize: '10px', fontFamily: 'monospace', fontWeight: '700',
+            color: 'var(--accent)', marginBottom: 4, textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+          }}>
+            {item.clave || `Variante ${vi + 1}`}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {(item.titulos || []).map((t, ti) => (
+              <div key={ti} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  value={t}
+                  onChange={e => setTitulo(vi, ti, e.target.value)}
+                  style={{
+                    flex: 1, fontSize: '12px', color: 'var(--text-primary)',
+                    background: 'var(--bg)', border: '0.5px solid var(--border)',
+                    borderRadius: 6, padding: '5px 10px', boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{
+                  fontSize: '10px', fontWeight: '600', flexShrink: 0, minWidth: 32, textAlign: 'right',
+                  color: t.length > 55 ? '#f97316' : 'var(--text-tertiary)',
+                }}>
+                  {t.length}/60
+                </span>
+                <button type="button" onClick={() => removeTitulo(vi, ti)} title="Quitar título" style={{
+                  flexShrink: 0, width: 20, height: 20, border: 'none', background: 'transparent',
+                  color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '13px', lineHeight: 1,
+                }}>✕</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => addTitulo(vi)} style={{
+              alignSelf: 'flex-start', border: 'none', background: 'transparent',
+              color: 'var(--accent)', fontSize: '11px', fontWeight: '600', cursor: 'pointer', padding: '2px 0',
+            }}>+ Agregar título</button>
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -954,6 +989,7 @@ function ProductsTab({ onToast }) {
       const body = {
         descripcion:     enhApplyDesc ? enhanceResult.descripcion : null,
         atributos_nuevos: (enhanceResult.atributos_sugeridos || []).filter((_, i) => enhApplyAttrs.includes(i)),
+        titulos_por_variante: enhanceResult.titulos_por_variante || [],
       }
       const r = await fetch(`/api/products/${enhanceResult.productId}/apply-enhance`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1464,17 +1500,15 @@ function ProductsTab({ onToast }) {
                   </div>
 
                   {/* Títulos sugeridos */}
-                  {enhanceResult.titulos_sugeridos?.length > 0 && (
+                  {enhanceResult.titulos_por_variante?.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
                       <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', margin: '0 0 6px' }}>
-                        Títulos sugeridos:
+                        Títulos sugeridos (editables):
                       </p>
-                      {enhanceResult.titulos_sugeridos.map((t, i) => (
-                        <p key={i} style={{
-                          fontSize: '12px', margin: '0 0 4px', padding: '4px 8px',
-                          background: '#fff', borderRadius: 4, border: '1px solid var(--border)',
-                        }}>{t}</p>
-                      ))}
+                      <EditableTitulos
+                        grupos={enhanceResult.titulos_por_variante}
+                        onChange={next => setEnhanceResult(prev => ({ ...prev, titulos_por_variante: next }))}
+                      />
                     </div>
                   )}
 

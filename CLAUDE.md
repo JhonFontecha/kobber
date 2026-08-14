@@ -1,89 +1,192 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Esta es la documentación canónica del proyecto para IA (Claude Code u otra). Se sincroniza vía git,
+así que está disponible en cualquier Mac donde se clone el repo. **Objetivo: que una sesión nueva de
+IA pueda trabajar en Kobber sin releer todo el código fuente.**
 
-## What is Kobber
+Para dejar el proyecto corriendo desde cero (instalación, `.env`, primer arranque) ver
+**[README.md](./README.md)** — este archivo asume que el entorno ya funciona y se enfoca en
+arquitectura y convenciones.
 
-Internal tool for Truper/Pretul/FIERO hardware catalog management and MercadoLibre Colombia bulk publishing. It extracts product data from PDF catalogs using Claude vision, enriches it with AI-generated descriptions, and produces Excel files in ML's bulk-upload format.
+> **Política de mantenimiento:** cualquier cambio que se suba (commit/push) que afecte arquitectura,
+> rutas de API, esquema de base de datos, convenciones o flujo de trabajo **debe** actualizar este
+> archivo en el mismo cambio. Si no estás seguro de si un cambio amerita actualizar la doc, actualízala
+> igual — es más barato que quede desactualizada una sección de más que una de menos.
 
-## Running the project
+## Qué es Kobber
 
-Two servers must run simultaneously:
+Herramienta interna para gestión de catálogo de herramientas Truper/Pretul/FIERO y publicación masiva
+en MercadoLibre Colombia. El repo contiene **dos aplicaciones frontend distintas** montadas en el mismo
+proyecto Vite:
+
+1. **Panel admin** (`src/App.jsx`, ruta `/admin/*`) — herramienta interna: extrae productos de PDFs de
+   catálogo con Claude Vision, los enriquece con descripciones IA, genera Excels para subir a ML.
+2. **Tienda pública** (`src/tienda/`, rutas `/tienda/*` y `/*`) — e-commerce de cara al cliente final que
+   lee del mismo backend/BD, con carrito, checkout y contacto por WhatsApp.
+
+Ver `src/main.jsx` para el ruteo: `/admin/*` → `App`, todo lo demás → `StorePage` (tienda pública).
+
+## Corriendo el proyecto
+
+Dos servidores en simultáneo:
 
 ```bash
-# Backend (FastAPI) — from repo root
+# Backend (FastAPI) — desde la raíz del repo
 backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir backend
 
-# Frontend (Vite + React) — from repo root
+# Frontend (Vite + React) — desde la raíz del repo
 npm run dev
 ```
 
-Frontend at http://localhost:5173 — all `/api/*` calls proxy to `http://localhost:8000`.
+Frontend en http://localhost:5173 (tienda pública en `/`, panel admin en `/admin`) — todas las llamadas
+`/api/*` se proxean a `http://localhost:8000` (ver `vite.config.js`).
 
-## Environment
+Backend health check: `GET /health` → `{"status": "ok"}`. Al arrancar imprime en consola si está usando
+la `service_role` key de Supabase o la `anon` (con RLS activo) — revisar esto si algo falla con permisos.
 
-Copy `backend/.env.example` (or create `backend/.env`) with:
+### ⚠️ Antes de debuggear algo raro: descartar procesos huérfanos
+
+Si un cambio en el código **no se refleja** en el navegador o en las respuestas del backend aunque
+el archivo esté guardado correctamente — **antes de sospechar del código**, verificar que no haya
+un servidor de desarrollo viejo (de una sesión de terminal o de Claude Code anterior) todavía
+escuchando en el puerto y sirviendo código desactualizado en silencio:
+
+```bash
+lsof -nP -iTCP:5173 -sTCP:LISTEN   # frontend
+lsof -nP -iTCP:8000 -sTCP:LISTEN   # backend
+ps -o pid,lstart,command -p <PID>  # confirmar si es más viejo que la sesión actual
+```
+
+Si aparece un proceso mucho más viejo que la sesión actual, matarlo y arrancar uno limpio. Esto
+pasó de verdad el 2026-08-12 y costó una sesión entera de debugging confuso persiguiendo un bug de
+React que en realidad no existía — el navegador estaba hablando con un Vite huérfano de horas antes.
+
+## Entorno
+
+`backend/.env` (no versionado, cada Mac lo mantiene local):
 
 ```
 ANTHROPIC_API_KEY=...
 SUPABASE_URL=...
 SUPABASE_KEY=...          # anon key
-SUPABASE_SERVICE_KEY=...  # service_role key — required to bypass RLS
+SUPABASE_SERVICE_KEY=...  # service_role key — requerida para bypassear RLS
+STORAGE_PATH=./storage    # legado de la era SQLite, ya casi no se usa
 ```
 
-`config.py` loads `.env` relative to its own file path, so cwd doesn't matter.
+`config.py` carga `.env` relativo a su propia ubicación, así que el cwd no importa.
 
-## Architecture
+## Arquitectura
 
 ### Backend (`backend/`)
 
-FastAPI app in `main.py` with five routers:
+FastAPI (`main.py`), seis routers:
 
-| Router | Prefix | Responsibility |
+| Router | Prefix | Responsabilidad |
 |--------|--------|----------------|
-| `catalog.py` | `/api/catalog` | PDF → Claude vision → product extraction; save to Supabase with AI description + background image fetch |
-| `products.py` | `/api/products` | CRUD, search by code/Excel, `categoria_ml` backfill, Claude `✨ enhance` endpoint |
-| `excel.py` | `/api/excel` | Generate Kobber-format Excel and ML bulk-upload Excel from DB data |
-| `images.py` | `/api/images` | Fetch product images from Trupper.com (direct URL + BancoContenidoDigital scraping) |
-| `analyzer.py` | `/api/analyzer` | Fill blank ML templates with DB data; detect ML column layout dynamically per sheet |
+| `catalog.py` | `/api/catalog` | PDF → Claude Vision → extracción de productos; guarda en Supabase con descripción IA + fetch de imágenes en background |
+| `products.py` | `/api/products` | CRUD de productos/variantes, búsqueda por código/Excel, backfill de `categoria_ml`, endpoint `✨ enhance` con Claude |
+| `excel.py` | `/api/excel` | Genera Excel formato Kobber y Excel de carga masiva ML a partir de datos de la BD |
+| `images.py` | `/api/images` | Trae imágenes de producto desde Trupper.com (URL directa + scraping de BancoContenidoDigital) |
+| `analyzer.py` | `/api/analyzer` | Llena plantillas ML en blanco con datos de la BD; detecta layout de columnas ML dinámicamente por hoja; automatiza login/scraping de ML vía Playwright |
+| `store.py` | `/api/store` | Lee productos con precio de venta calculado (margen aplicado) para la tienda pública — **es lo que consume el frontend de tienda** |
 
-**Key shared functions:**
-- `catalog.get_ml_category(nombre)` — calls ML's `domain_discovery` API to assign `categoria_ml`
-- `catalog.enhance_product_data(...)` — calls Claude (Haiku) to generate descriptions in the universal format; `enhance_product_data_safe` never throws
-- `database.get_client()` — singleton Supabase client using `service_role` key
+**Funciones compartidas clave:**
+- `catalog.get_ml_category(nombre)` — llama la API `domain_discovery` de ML para asignar `categoria_ml`
+- `catalog.enhance_product_data(...)` — llama Claude (Haiku) para generar descripciones en formato universal; `enhance_product_data_safe` nunca lanza excepción
+- `database.get_client()` — cliente Supabase singleton, usa `service_role` key si está seteada (si no, cae a `anon` y queda sujeto a RLS)
 
-### Database (Supabase)
+**⚠️ Código duplicado a limpiar:** `products.py` tiene endpoints `GET /api/products/tienda` y
+`GET /api/products/tienda/{id}` que duplican casi línea por línea la lógica de `store.py`
+(`GET /api/store/productos`). El frontend (`src/tienda/hooks/useStoreProducts.js`) sólo llama a
+`/api/store/productos` — los de `products.py` parecen no tener consumidor y son candidatos a eliminar.
 
-Main tables: `products`, `product_variants`, `product_attributes`, `product_images`.
+### Base de datos (Supabase — Postgres + Storage)
 
-`products.categoria_ml` stores the ML category name (e.g. `"Mandriles"`) used to route products to the correct sheet in the ML template. Run `POST /api/products/backfill-categoria-ml` after adding the column or importing legacy data.
+Tablas principales: `products`, `product_variants`, `product_attributes`, `product_images`.
 
-### ML template column detection
+- `products.categoria_ml` guarda el nombre de categoría ML (ej. `"Mandriles"`), usado para rutear
+  productos a la hoja correcta de la plantilla ML. Correr `POST /api/products/backfill-categoria-ml`
+  después de agregar la columna o importar datos legado.
+- `product_variants.precio_distribuidor` es el precio base (costo); el precio de venta se calcula
+  al vuelo aplicando un margen (`precio_venta = precio_distribuidor * (1 + margen/100)`), nunca se
+  persiste el precio de venta.
+- `product_attributes` puede ser a nivel de familia de producto (`variant_id` nulo) o por variante.
+- Imágenes y archivos ya no viven en `backend/storage/` local — todo vive en Supabase Storage (migrado
+  desde SQLite + filesystem en mayo 2026).
 
-ML Excel files have different column layouts per category. `analyzer._ml_col_map(ws)` scans rows 2–5 and picks the row with the most keyword matches as the header row — this handles both old (headers at row 4) and new (headers at row 3) template formats.
+### Títulos sugeridos por variante (editables)
 
-### Frontend (`src/App.jsx`)
+`product_variants.titulos_sugeridos` guarda un array de ~4 títulos alternativos por variante,
+generados por Claude junto con la descripción (`catalog.enhance_product_data`, prompt
+`ENHANCE_PROMPT` — sección "TITULOS PARA MERCADOLIBRE COLOMBIA"). El prompt traduce términos del
+catálogo fuente (español mexicano) a terminología colombiana de ferretería e imita el patrón de
+títulos reales de ML (palabra clave genérica primero, marca, diferenciador técnico, sin relleno).
 
-Single-file React app (~2300 lines). Key components:
+- Se generan automáticamente durante el import de PDF y también con el botón manual `✨ Mejorar`
+  (ambos flujos llaman a `catalog.enhance_product_data`/`enhance_product_data_safe`, mismo prompt).
+- Son **editables** en la UI en ambos lugares (componente compartido `EditableTitulos` en
+  `App.jsx`): se puede modificar el texto, borrar un título o agregar uno nuevo por variante.
+- El guardado real pasa por `POST /api/products/{id}/apply-enhance`, que ahora acepta
+  `titulos_por_variante` en el body y actualiza `product_variants.titulos_sugeridos` por `clave`
+  (`products.py`). En el import, se persisten directamente vía `_save_to_supabase` con lo que venga
+  en el payload — no hay paso de "aplicar" separado.
+- `products.enhance_product` (el endpoint del botón manual) usa `enhance_product_data_safe`
+  (con reintento) — **no** la versión sin retry — para evitar respuestas sin títulos.
+- Usados al llenar plantillas ML: `analyzer.py` genera una fila por cada título sugerido de la
+  variante (o un título genérico `nombre + marca` si no hay ninguno guardado).
 
-- **FlowTab** — 4-step ML publisher: search products → download templates (Playwright scraper) → upload template → fill with DB data
-- **ProductsTab** — search by code/clave or Excel upload; inline edit; `✨ Mejorar` button triggers Claude enhance
-- **ImportTab** — PDF upload → SSE streaming extraction → review → save (descriptions are enhanced during extraction, visible before save)
-- **ImagesTab** — browse/save Trupper images; "↻ Sincronizar faltantes" fetches images only for products with none
-- **AnalyzeTab** — upload blank ML template → `fill-blank-template` fills it using `categoria_ml` from DB
+### Detección de columnas de plantilla ML
 
-### ML template scraper (`scripts/`)
+Los Excel de ML tienen layouts de columna distintos por categoría. `analyzer._ml_col_map(ws)` escanea
+las filas 2–5 y elige la fila con más coincidencias de keywords como header — soporta formatos viejos
+(headers en fila 4) y nuevos (headers en fila 3).
 
-Playwright scripts to automate ML's bulk-upload page:
+### Frontend — Panel admin (`src/App.jsx`, ~2770 líneas, componente único)
 
-1. `ml_login.py` — opens browser for manual login, saves session to `/tmp/ml_session.json`
-2. `ml_scrape_template.py` — uses saved session to search categories and download the template; call with `--file /tmp/productos.txt`
+Componentes/tabs principales (todo en un solo archivo):
 
-Run from repo root using `backend/venv/bin/python3 scripts/<script>.py`.
+- **FlowTab** — publicador ML en 4 pasos: buscar productos → descargar plantillas (scraper Playwright) → subir plantilla → llenar con datos de BD
+- **ProductsTab** — búsqueda por código/clave o carga de Excel; edición inline; botón `✨ Mejorar` dispara enhance de Claude, incluidos los títulos sugeridos por variante (editables, ver abajo)
+- **ImportTab** — subida de PDF → extracción streaming (SSE) → revisión → guardar (las descripciones y títulos sugeridos se generan durante la extracción, editables antes de guardar)
+- **ImagesTab** — explorar/guardar imágenes de Trupper; "↻ Sincronizar faltantes" trae imágenes sólo para productos sin ninguna
+- **AnalyzeTab** — subir plantilla ML en blanco → `fill-blank-template` la llena usando `categoria_ml` de la BD
+- **ExportTab** — generación de Excel (Kobber / ML)
 
-## Important conventions
+### Frontend — Tienda pública (`src/tienda/`)
 
-- **Fotos separator**: ML requires comma (`,`) between image URLs — not `|`. All Excel generation endpoints use `",".join(urls)`.
-- **Gray cells**: In ML templates, cells pre-filled by catalog (products with an MCO code in column A) must not be overwritten — only SKU, stock, and EAN are safe to fill for catalog products.
-- **Variant titles**: ML requires the same title for all variants of a product (per the Ayuda sheet).
-- **Haiku for batch, Opus for interactive**: `enhance_product_data` during import uses `claude-haiku-4-5-20251001`; the `/enhance` endpoint (manual button) uses `claude-opus-4-7` for higher quality.
+E-commerce con React Router + Zustand:
+
+- `StorePage.jsx` — shell con rutas anidadas: `/` (Home), `/catalogo`, `/ofertas`, `/login`, `/checkout`, `/producto/:id`
+- `store/cartStore.js` — carrito global con Zustand + persistencia en localStorage (`kobber-cart`); selectores `selectTotal`/`selectCount`
+- `hooks/useStoreProducts.js` — hook de fetch a `/api/store/productos` con filtros (búsqueda, categoría, marca, precio, stock, margen)
+- `components/` — `Header`, `Footer`, `CartDrawer`, `ProductCard`, `ProductQuickModal`, `SplashScreen`, `WhatsAppFloat` (botón flotante de contacto)
+- `pages/LoginPage.jsx` — **login con credenciales hardcodeadas** (`admin@kobber.com` / `1234`) que redirige a `/admin`; no es autenticación real, es un gate simbólico al panel admin. No usar como base de seguridad.
+- `pages/CheckoutPage.jsx` — flujo de checkout
+
+Diseño: Tailwind con paleta custom "graphite" (ver `tailwind.config.js`), estilo consistente entre tienda y (parcialmente) panel admin.
+
+### Scripts de automatización ML (`scripts/`)
+
+Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backend, invocados manualmente):
+
+1. `ml_login.py` — abre browser para login manual, guarda sesión en `/tmp/ml_session.json`
+2. `ml_scrape_template.py` — usa la sesión guardada para buscar categorías y descargar la plantilla; `--file /tmp/productos.txt` o lista de productos como args. Tiene `CATEGORY_OVERRIDES` y `SIN_CATEGORIA_ML` hardcodeados para casos donde la clasificación automática de ML falla.
+3. `ml_inspect.py` — utilidad de debug para inspeccionar selectores de la página de ML
+
+Correr desde la raíz del repo: `backend/venv/bin/python3 scripts/<script>.py`.
+
+## Convenciones importantes
+
+- **Separador de fotos**: ML requiere coma (`,`) entre URLs de imagen — no `|`. Todos los endpoints de generación de Excel usan `",".join(urls)`.
+- **Celdas grises**: en plantillas ML, las celdas pre-llenadas por catálogo (productos con código MCO en columna A) no deben sobreescribirse — sólo SKU, stock y EAN son seguros de llenar para productos de catálogo.
+- **Títulos de variante**: ML requiere el mismo título para todas las variantes de un producto (según la hoja Ayuda).
+- **Un solo modelo para descripción+títulos**: `enhance_product_data` (usado tanto en el import como en el botón manual `✨ Mejorar`) usa `claude-haiku-4-5-20251001` — revisar el modelo exacto en `catalog.py` porque cambia con el tiempo. No hay actualmente una ruta que use Opus.
+- **Precio de venta nunca se persiste**: siempre se calcula desde `precio_distribuidor` + margen al momento de leer, tanto en `products.py` como en `store.py`.
+
+## Problemas conocidos / deuda técnica
+
+- Endpoints duplicados `/api/products/tienda*` vs `/api/store/productos*` (ver arriba) — limpiar cuando se toque `products.py` o `store.py`.
+- Login de tienda (`LoginPage.jsx`) no es autenticación real — credenciales hardcodeadas en el frontend, visibles en el bundle. No usar para proteger nada sensible sin reemplazarlo primero.
+- `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
+- `playwright` (usado por `scripts/ml_*.py`) **no está en `requirements.txt`** — hay que instalarlo aparte (`pip install playwright`). En macOS 13 (Ventura), `playwright install chromium` falla porque Playwright dejó de dar soporte a Chromium en ese OS — usar `p.chromium.launch(channel="chrome")` para lanzar el Chrome del sistema en vez de descargar el binario propio de Playwright.
+- El servidor de búsqueda pública de ML (`api.mercadolibre.com/sites/MCO/search` y `/products/search`) ahora devuelve 403 (`PolicyAgent`, firewall anti-bot) para requests sin sesión — incluso navegando con un browser real headless. Sólo `domain_discovery` (usado por `get_ml_category`) sigue público. Cualquier feature que necesite traer resultados de búsqueda reales de ML requiere sesión logueada vía Playwright (`ml_login.py`) o una app OAuth propia registrada en developers.mercadolibre.com — no hay atajo sin eso.

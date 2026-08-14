@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_client
-from routes.catalog import enhance_product_data_safe, enhance_product_data, get_ml_category
+from routes.catalog import enhance_product_data_safe, get_ml_category, _truncar_titulos
 
 router = APIRouter()
 
@@ -599,7 +599,7 @@ async def enhance_product(product_id: str):
         for a in (v.get("product_attributes") or [])
     ]
 
-    data = enhance_product_data(
+    data = enhance_product_data_safe(
         nombre             = p["nombre"],
         marca              = p.get("marca") or "TRUPER",
         categoria          = p.get("categoria") or "",
@@ -622,7 +622,7 @@ async def enhance_product(product_id: str):
 
 @router.post("/{product_id}/apply-enhance")
 def apply_enhance(product_id: str, body: dict):
-    """Aplica la descripción mejorada y atributos sugeridos al producto."""
+    """Aplica la descripción, atributos y títulos (posiblemente editados) al producto."""
     db = get_client()
 
     fields: dict = {}
@@ -645,6 +645,16 @@ def apply_enhance(product_id: str, body: dict):
             }
             for a in nuevos
         ]).execute()
+
+    # Guardar títulos sugeridos (el usuario pudo haberlos editado en el frontend)
+    titulos_por_variante = _truncar_titulos(body.get("titulos_por_variante") or [])
+    for item in titulos_por_variante:
+        clave = item.get("clave")
+        if not clave:
+            continue
+        db.table("product_variants").update({
+            "titulos_sugeridos": item.get("titulos", []),
+        }).eq("product_id", product_id).eq("clave", clave).execute()
 
     return {"ok": True}
 

@@ -124,7 +124,31 @@ TITULOS PARA MERCADOLIBRE COLOMBIA
 Genera 4 titulos. Cada uno debe usar un sinonimo distinto como primera palabra
 para capturar diferentes busquedas del mismo producto.
 
-FORMULA: [Sinonimo] + [Marca] + [Diferenciador clave] + [Medida o material]
+IMPORTANTE — ESPANOL COLOMBIANO, NO MEXICANO:
+El catalogo fuente (Truper) esta escrito en espanol de Mexico. Traduce los terminos a como
+los busca un comprador colombiano en ferreteria, aunque el catalogo diga otra cosa. Ejemplos
+de terminos que CAMBIAN entre Mexico y Colombia:
+  - "cincho" (MX) -> "abrazadera" (CO)
+  - "perico"/"chalupa" (MX, tipo de pinza) -> "pinza" o "alicate" (CO — "perico" no se usa)
+  - "desarmador" (MX) -> "destornillador" (CO)
+  - "cinta canela" (MX) -> "cinta de enmascarar" o "cinta pegante" (CO)
+  - "taquete" (MX) -> "chazo" o "taco de expansion" (CO)
+  - "cubeta" (MX, balde) -> "balde" (CO)
+Ante la duda, priorizá siempre el termino que usaria un comprador colombiano buscando en
+MercadoLibre, nunca el que aparece literal en el catalogo.
+
+COMO SE TITULA REALMENTE EN MERCADOLIBRE COLOMBIA:
+Los compradores buscan con texto libre y ML ordena por relevancia de palabras clave. Los
+titulos que mejor posicionan siguen este patron:
+  [Termino de busqueda generico] [Marca] [Diferenciador especifico] [Medida/material/uso]
+- La PRIMERA palabra es la que mas gente escribiria en el buscador (el nombre generico de
+  la herramienta) — nunca la marca ni un adjetivo.
+- No uses relleno que no aporta busqueda: "profesional", "alta calidad", "nuevo", "garantia"
+  — nadie busca por esas palabras, solo ocupan caracteres que le restan al diferenciador.
+- El diferenciador debe ser algo por lo que un comprador SI filtraria: material (cromo
+  vanadio, acero), medida (9", 1/2"), norma (ASME) o uso especifico (electricista, plomeria).
+
+FORMULA: [Sinonimo generico] + [Marca] + [Diferenciador clave] + [Medida o material]
 
 REGLAS:
 1. LIMITE ESTRICTO: maximo 60 caracteres por titulo, espacios incluidos.
@@ -138,14 +162,15 @@ REGLAS:
 5. No uses articulos (el, la, los, de, para) — ocupan caracteres sin aportar a busquedas.
 6. No repitas el mismo sinonimo en dos titulos.
 7. Si el producto tiene variantes de tamano, elige la mas representativa o usa "Varias Medidas".
-8. Usa terminologia colombiana de ferreteria.
+8. Usa terminologia colombiana de ferreteria — ver la lista de arriba, no mexicanismos.
 9. Sin acentos ni tildes en los titulos (ML los indexa mejor sin ellos).
+10. No uses palabras de relleno sin valor de busqueda (profesional, calidad, nuevo, garantia).
 
-EJEMPLO para un alicate de electricista 9 pulgadas cromo vanadio Trupper:
-  "Alicate Electricista Trupper 9 Cromo Vanadio"   46 chars OK
+EJEMPLO para un alicate de electricista 9 pulgadas cromo vanadio Trupper (catalogo dice "perico"):
+  "Alicate Electricista Trupper 9 Cromo Vanadio"    46 chars OK
   "Pinzas Electricista Trupper Alta Palanca Cr-V"   45 chars OK
-  "Tenaza Electricista Trupper 9 Acero Garantia"    45 chars OK
-  "Cortador Cable Trupper Alta Palanca Norma ASME"  46 chars OK
+  "Tenaza Electricista Trupper 9 Pulgadas Acero"    45 chars OK
+  "Cortafrio Electricista Trupper Palanca ASME"     44 chars OK
 
 Responde UNICAMENTE con este JSON (sin markdown):
 {{
