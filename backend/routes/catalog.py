@@ -5,6 +5,7 @@ import json
 import re
 import ssl
 import time
+import traceback
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -119,6 +120,18 @@ INSTRUCCIONES ADICIONALES
    FORMATO OBLIGATORIO: "Color1/Color2" (cuerpo / empunadura o accesorio).
    Ejemplos correctos: "Plateado/Naranja", "Negro/Rojo", "Amarillo/Negro"
    Formato: {{"nombre": "color", "valor": "Color1/Color2", "unidad": null}}
+6. PULGADAS: en la descripcion (y en cualquier atributo/medida que generes), si una
+   medida va en pulgadas usa el simbolo " pegado al numero, sin espacio entre el numero
+   y el simbolo (9", 8", 3", 1/2" — nunca "9 \"" con espacio).
+7. ORTOGRAFIA DE MARCA: se escribe "Truper" (una sola P) — NUNCA "Trupper". No lo
+   escribas de memoria: usa exactamente el valor recibido en Marca ({marca}), letra por
+   letra, en cada lugar donde menciones la marca (linea "Marca:", "Serie o linea",
+   parrafo ampliado, etc). No confies en tu conocimiento general de la marca.
+8. MARCA SIN CONFIRMAR: si Marca dice "SIN CONFIRMAR", el catalogo no permitio
+   identificarla con certeza al capturar el producto. NO asumas Truper ni ninguna otra
+   marca — intenta deducirla de Nombre/Descripcion actual/Caracteristicas si hay una
+   pista clara e inequivoca; si no la hay, omite toda mencion de marca (no escribas
+   "SIN CONFIRMAR" literal en el texto, y en la linea "Marca:" deja el valor vacio).
 
 TITULOS PARA MERCADOLIBRE COLOMBIA
 Genera 4 titulos. Cada uno debe usar un sinonimo distinto como primera palabra
@@ -157,7 +170,9 @@ REGLAS:
    de mas de 60 caracteres.
 2. El primer termino de cada titulo debe ser un sinonimo diferente del producto
    (ej: alicate / pinzas / tenaza / cortador / pela-cable / ponchador).
-3. Incluye la marca ({marca}) en todos los titulos.
+3. Incluye la marca ({marca}) en todos los titulos — EXCEPTO si Marca dice
+   "SIN CONFIRMAR": en ese caso NO la menciones ni la inventes (nunca asumas Truper),
+   usa ese espacio para el diferenciador tecnico en su lugar.
 4. Incluye el diferenciador mas relevante: material, tamano, uso, norma o funcion especial.
 5. No uses articulos (el, la, los, de, para) — ocupan caracteres sin aportar a busquedas.
 6. No repitas el mismo sinonimo en dos titulos.
@@ -165,12 +180,14 @@ REGLAS:
 8. Usa terminologia colombiana de ferreteria — ver la lista de arriba, no mexicanismos.
 9. Sin acentos ni tildes en los titulos (ML los indexa mejor sin ellos).
 10. No uses palabras de relleno sin valor de busqueda (profesional, calidad, nuevo, garantia).
+11. PULGADAS: si la medida va en pulgadas, usa el simbolo " pegado al numero, sin espacio
+    entre el numero y el simbolo (9", 8", 3", 1/2" — nunca "9 "" ni "9 Pulgadas").
 
 EJEMPLO para un alicate de electricista 9 pulgadas cromo vanadio Truper (catalogo dice "perico"):
-  "Alicate Electricista Truper 9 Cromo Vanadio"     45 chars OK
+  "Alicate Electricista Truper 9" Cromo Vanadio"    44 chars OK
   "Pinzas Electricista Truper Alta Palanca Cr-V"    45 chars OK
-  "Tenaza Electricista Truper 9 Pulgadas Acero"     44 chars OK
-  "Cortafrio Electricista Truper Palanca ASME"      43 chars OK
+  "Tenaza Electricista Truper 9" Acero ASME"        40 chars OK
+  "Cortafrio Electricista Truper 9" Palanca"        40 chars OK
 
 Responde UNICAMENTE con este JSON (sin markdown):
 {{
@@ -227,7 +244,7 @@ def enhance_product_data(
 
     prompt = ENHANCE_PROMPT.format(
         nombre            = nombre,
-        marca             = marca or "TRUPER",
+        marca             = marca or "SIN CONFIRMAR",
         categoria         = categoria or "",
         variantes         = variantes_str or "una variante",
         descripcion_actual= descripcion_actual or "sin descripción",
@@ -266,7 +283,7 @@ async def _enhance_one(p: dict, page_num: int | None = None) -> None:
     async with _ENHANCE_SEM:
         enhanced = await asyncio.to_thread(
             enhance_product_data_safe,
-            p.get("nombre", ""), p.get("marca", "TRUPER"),
+            p.get("nombre", ""), p.get("marca") or "",
             p.get("categoria", ""), p.get("variantes", []),
             p.get("descripcion", ""), p.get("caracteristicas", []), all_attrs,
         )
@@ -276,6 +293,23 @@ async def _enhance_one(p: dict, page_num: int | None = None) -> None:
     p["titulos_por_variante"] = _truncar_titulos(titulos_raw)
     if enhanced.get("atributos_sugeridos"):
         p["atributos_sugeridos"] = enhanced["atributos_sugeridos"]
+
+
+async def _fetch_images_one(p: dict) -> None:
+    """Busca imagenes candidatas (URLs directas en truper.com) para revisar antes de
+    guardar. No las guarda en BD — solo las agrega al dict en memoria para que el
+    frontend muestre una galeria seleccionable durante la revision."""
+    from routes.images import _fetch_for_clave
+
+    claves = [v["clave"] for v in p.get("variantes", []) if v.get("clave")]
+    if not claves:
+        p["imagenes_candidatas"] = []
+        return
+
+    resultados = await asyncio.gather(*[_fetch_for_clave(c) for c in claves])
+    seen: set = set()
+    unique = [u for urls in resultados for u in urls if not (u in seen or seen.add(u))]
+    p["imagenes_candidatas"] = unique
 
 
 def _truncar_titulos(titulos_por_variante, max_chars: int = 60) -> list:
@@ -360,8 +394,14 @@ REGLAS CRÍTICAS PARA PRECIOS — LEE ESTO PRIMERO
    - La letra "X" vs el número "×" o el símbolo "x"
    - La letra "S" vs el número "5"
    - La letra "Z" vs el número "2"
+   - La letra "B" vs el número "8" (ej: clave real "MOTB-4" mal leída como "MOT8-4")
    Copia el código EXACTAMENTE como aparece en el catálogo, carácter por carácter.
    NUNCA adivines ni normalices un código — si dice "9X", escribe "9X", no "9I" ni "91".
+
+7. PULGADAS: en "nombre" y "descripcion" (familia y variantes), si una medida va en
+   pulgadas usa el símbolo " pegado al número, sin espacio entre el número y el símbolo
+   (9", 8", 3", 1/2" — nunca "9 \"" con espacio). Aplica aunque el catálogo fuente traiga
+   el espacio.
 
 ════════════════════════════════════════
 ORIENTACIÓN DEL CUADRO DE PRECIOS
@@ -389,11 +429,22 @@ ESTRUCTURA A EXTRAER
 Para cada familia de producto devuelve:
 - nombre: nombre completo de la familia (ej: "Alicates de electricista con jalacables")
 - descripcion: descripción larga con usos y características técnicas
-- marca: la marca EXACTAMENTE como aparece impresa en la página (ej: "TRUPER", "PRETUL",
-  "FIERO"), respetando su ortografía real — "TRUPER" se escribe con una sola P, NO
-  "TRUPPER". El catálogo puede incluir más de una marca; no asumas que todo es TRUPER.
-  Si la marca no es visible en esa página, usa null — no inventes ni copies la marca de
-  otra página.
+- marca: DEDUCE la marca activamente antes de rendirte a null — mira TODA la página, no
+  solo el texto junto al producto:
+  1. Texto impreso junto al producto o en el encabezado/pie de la página (ej: "TRUPER",
+     "PRETUL", "FIERO").
+  2. Logo o isotipo de marca visible en cualquier parte de la página (esquinas, membrete,
+     franja de color característica de cada marca), aunque no haya texto junto al producto.
+  3. Encabezado de sección o de página que indique la marca de todo ese bloque — el
+     catálogo agrupa productos por marca en secciones, así que una marca declarada al
+     inicio de la sección aplica a los productos de esa sección aunque no se repita en
+     cada fila.
+  El catálogo mezcla varias marcas reales (Truper, Pretul, FIERO, y posiblemente otras) —
+  NUNCA asumas que un producto es TRUPER solo porque la mayoría del catálogo lo es.
+  Usa null ÚNICAMENTE si tras revisar los 3 puntos anteriores sigue sin haber ninguna
+  pista — no inventes ni copies la marca de otra página sin evidencia en esta.
+  Ortografía: cuando la marca sea Truper, respeta su ortografía real — se escribe
+  "TRUPER" con una sola P, NUNCA "TRUPPER".
 - categoria: categoría principal (ej: "Alicates")
 - subcategoria: subcategoría si existe, o null
 - seccion: letra de sección visible en la página (ej: "C", "E", "J", "L"), o null
@@ -431,11 +482,21 @@ ACCEPTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 def _page_to_jpeg_bytes(page, max_width: int = 1400) -> bytes:
     img_obj = page.images[0] if page.images else None
+    img = None
     if img_obj:
-        w, h = img_obj["srcsize"]
-        raw = img_obj["stream"].get_data()
-        img = Image.frombytes("RGB", (w, h), raw)
-    else:
+        try:
+            w, h = img_obj["srcsize"]
+            raw = img_obj["stream"].get_data()
+            img = Image.frombytes("RGB", (w, h), raw)
+        except (ValueError, TypeError) as e:
+            # El stream puede venir comprimido (ej. DCTDecode/JPEG) o en un modo de
+            # color distinto a RGB sin comprimir — get_data() no lo decodifica en esos
+            # casos, así que los bytes crudos no coinciden con width*height*3 y
+            # frombytes falla. Renderizamos la página completa como fallback en vez
+            # de perder la página entera.
+            print(f"[extract] no se pudo leer imagen embebida directamente ({e}); "
+                  f"renderizando pagina completa como fallback")
+    if img is None:
         img = page.to_image(resolution=100).original
 
     if img.width > max_width:
@@ -505,14 +566,24 @@ def _call_claude(image_bytes: bytes) -> list[dict]:
 
 
 def _save_to_supabase(products_data: list) -> dict:
+    from routes.images import _save_images
+
     db = get_client()
     saved_products  = 0
     saved_variants  = 0
     product_ids_saved: list[str] = []
+    # Productos para los que el frontend NO mando seleccion de imagenes (revision
+    # vieja o llamada directa a /save) — a esos les corremos el fetch en background
+    # como antes. Si mando seleccion (aunque sea vacia = "ninguna"), la respetamos
+    # y no pisamos la decision del usuario con un fetch a ciegas.
+    product_ids_sin_seleccion: list[str] = []
 
     for p in products_data:
         nombre       = p.get("nombre", "")
-        marca        = p.get("marca") or "TRUPER"
+        # No forzar "TRUPER" cuando Claude no pudo confirmar la marca en la pagina —
+        # el catalogo incluye Truper/Pretul/FIERO y a veces otras; asumir Truper por
+        # defecto mete marca incorrecta en productos que en realidad son de otra marca.
+        marca        = p.get("marca") or ""
         categoria    = p.get("categoria") or ""
         variantes    = p.get("variantes", [])
         family_attrs = p.get("atributos", [])
@@ -556,6 +627,16 @@ def _save_to_supabase(products_data: list) -> dict:
         product_id = result.data[0]["id"]
         saved_products += 1
         product_ids_saved.append(product_id)
+
+        # Imagenes elegidas por el usuario en la revision (checkboxes sobre las
+        # imagenes_candidatas encontradas durante la extraccion). None = el frontend
+        # no mando este campo -> cae al fetch en background de siempre.
+        imagenes_sel = p.get("imagenes_seleccionadas")
+        if imagenes_sel is not None:
+            if imagenes_sel:
+                _save_images(product_id, imagenes_sel)
+        else:
+            product_ids_sin_seleccion.append(product_id)
 
         # Atributos de familia extraídos del catálogo
         attrs_to_insert = list(family_attrs)
@@ -614,7 +695,12 @@ def _save_to_supabase(products_data: list) -> dict:
                     for a in variant_attrs
                 ]).execute()
 
-    return {"productos": saved_products, "variantes": saved_variants, "product_ids": product_ids_saved}
+    return {
+        "productos":   saved_products,
+        "variantes":   saved_variants,
+        "product_ids": product_ids_saved,
+        "product_ids_sin_seleccion": product_ids_sin_seleccion,
+    }
 
 
 # ── Búsqueda de imágenes en background ────────────────────────────────────────
@@ -681,13 +767,18 @@ async def extract_catalog(file: UploadFile = File(...)):
                 for p in products:
                     p["pagina_catalogo"] = p.get("pagina_catalogo") or page_fallback
 
-                await asyncio.gather(*[_enhance_one(p) for p in products])
+                await asyncio.gather(
+                    *[_enhance_one(p) for p in products],
+                    *[_fetch_images_one(p) for p in products],
+                )
 
                 yield _sse({"type": "progress", "page": 1, "total": 1,
                             "page_found": len(products), "total_found": len(products)})
                 yield _sse({"type": "done", "total_paginas": 1,
                             "total_productos": len(products), "productos": products, "errores": []})
             except Exception as e:
+                print(f"[extract] imagen — error: {e!r}")
+                traceback.print_exc()
                 yield _sse({"type": "page_error", "page": 1, "error": str(e)})
                 yield _sse({"type": "done", "total_paginas": 1,
                             "total_productos": 0, "productos": [], "errores": [{"pagina": 1, "error": str(e)}]})
@@ -726,7 +817,10 @@ async def extract_catalog(file: UploadFile = File(...)):
 
                 for p in products:
                     p["pagina_catalogo"] = p.get("pagina_catalogo") or page_num
-                await asyncio.gather(*[_enhance_one(p) for p in products])
+                await asyncio.gather(
+                    *[_enhance_one(p) for p in products],
+                    *[_fetch_images_one(p) for p in products],
+                )
 
                 all_products.extend(products)
                 yield _sse({
@@ -738,10 +832,13 @@ async def extract_catalog(file: UploadFile = File(...)):
                     "elapsed_s":   round(time.time() - t_start, 1),
                 })
             except json.JSONDecodeError as e:
+                print(f"[extract] pagina {page_num} — JSON invalido: {e}")
                 errors.append({"pagina": page_num, "error": f"No se pudo parsear JSON: {e}"})
                 yield _sse({"type": "page_error", "page": page_num, "error": str(e),
                             "elapsed_s": round(time.time() - t_start, 1)})
             except Exception as e:
+                print(f"[extract] pagina {page_num} — error: {e!r}")
+                traceback.print_exc()
                 errors.append({"pagina": page_num, "error": str(e)})
                 yield _sse({"type": "page_error", "page": page_num, "error": str(e),
                             "elapsed_s": round(time.time() - t_start, 1)})
@@ -773,8 +870,11 @@ async def save_extraction(body: dict, background_tasks: BackgroundTasks):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error guardando en Supabase: {e}")
 
-    # Buscar imágenes en background — no bloquea la respuesta al usuario
-    if result.get("product_ids"):
-        background_tasks.add_task(_fetch_and_save_images_bulk, result["product_ids"])
+    # Buscar imágenes en background SOLO para los productos donde el frontend no
+    # mando una seleccion explicita (ver _save_to_supabase) — si el usuario ya
+    # eligio/desmarco imagenes en la revision, esa decision ya se guardo y no la
+    # pisamos con un fetch a ciegas.
+    if result.get("product_ids_sin_seleccion"):
+        background_tasks.add_task(_fetch_and_save_images_bulk, result["product_ids_sin_seleccion"])
 
     return result

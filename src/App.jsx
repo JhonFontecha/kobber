@@ -331,6 +331,7 @@ function ImportTab({ onImported, onToast }) {
   const [result, setResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [editIdx, setEditIdx] = useState(null)
+  const [imgSel, setImgSel] = useState({})   // { [idx]: Set<url> } — imagenes elegidas por producto
   const inputRef = useRef()
 
   const handleFile = (e) => {
@@ -379,6 +380,11 @@ function ImportTab({ onImported, onToast }) {
             setProgress(prev => prev ? ({ ...prev, current: event.page, lastElapsed: event.elapsed_s, errors: (prev.errors ?? 0) + 1 }) : prev)
           } else if (event.type === 'done') {
             setResult(event)
+            const sel = {}
+            event.productos?.forEach((p, idx) => {
+              sel[idx] = new Set(p.imagenes_candidatas || [])
+            })
+            setImgSel(sel)
             if (event.errores?.length) {
               onToast({ type: 'error', text: `${event.errores.length} página(s) con errores de extracción.` })
             }
@@ -397,11 +403,16 @@ function ImportTab({ onImported, onToast }) {
     if (!result?.productos?.length) return
     setSaving(true)
     try {
-      const data = await api.post('/api/catalog/save', { productos: result.productos })
+      const productos = result.productos.map((p, idx) => ({
+        ...p,
+        imagenes_seleccionadas: [...(imgSel[idx] || [])],
+      }))
+      const data = await api.post('/api/catalog/save', { productos })
       onToast({ type: 'ok', text: `${data.productos} productos y ${data.variantes} variantes guardados.` })
       onImported()
       setResult(null)
       setFile(null)
+      setImgSel({})
     } catch (e) {
       onToast({ type: 'error', text: e.message })
     } finally {
@@ -417,12 +428,27 @@ function ImportTab({ onImported, onToast }) {
     })
   }
 
+  const toggleImagen = (idx, url) => {
+    setImgSel(prev => {
+      const s = new Set(prev[idx] || [])
+      s.has(url) ? s.delete(url) : s.add(url)
+      return { ...prev, [idx]: s }
+    })
+  }
+
   const removeProduct = (idx) => {
     setResult(prev => ({
       ...prev,
       productos: prev.productos.filter((_, i) => i !== idx),
       total_productos: prev.total_productos - 1,
     }))
+    setImgSel(prev => {
+      const next = {}
+      Object.keys(prev).map(Number).filter(i => i !== idx).forEach(i => {
+        next[i > idx ? i - 1 : i] = prev[i]
+      })
+      return next
+    })
   }
 
   return (
@@ -479,6 +505,9 @@ function ImportTab({ onImported, onToast }) {
                 onChange={(field, val) => updateProduct(idx, field, val)}
                 onRemove={() => removeProduct(idx)}
                 showSave={false}
+                imagenesCandidatas={p.imagenes_candidatas}
+                imagenesSeleccionadas={imgSel[idx]}
+                onToggleImagen={url => toggleImagen(idx, url)}
               />
             ))}
           </div>
@@ -498,7 +527,10 @@ const ESTADO_COLOR = {
   descartado: '#C0392B',
 }
 
-function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave, onFetchImages, showSave = true }) {
+function ProductCard({
+  product: p, isEditing, onEdit, onChange, onRemove, onSave, onFetchImages, showSave = true,
+  imagenesCandidatas, imagenesSeleccionadas, onToggleImagen,
+}) {
   // Normalize field names: handles both Claude extraction format and Supabase format
   const variantes  = p.variantes       || p.product_variants || []
   const imagenes   = p.imagenes        || p.product_images   || []
@@ -613,6 +645,14 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
           )}
         </div>
       </div>
+
+      {imagenesCandidatas && (
+        <ImagenesCandidatasGallery
+          imagenes={imagenesCandidatas}
+          seleccionadas={imagenesSeleccionadas}
+          onToggle={onToggleImagen}
+        />
+      )}
 
       {isEditing && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -882,6 +922,63 @@ function EditableTitulos({ grupos, onChange }) {
   )
 }
 
+// ── Galería de imágenes candidatas (revisión antes de guardar) ──────────────────
+
+function ImagenesCandidatasGallery({ imagenes, seleccionadas, onToggle }) {
+  if (!imagenes.length) {
+    return (
+      <p style={{ marginTop: 10, fontSize: '11px', color: 'var(--text-tertiary)' }}>
+        No se encontraron fotos automáticamente para este producto.
+      </p>
+    )
+  }
+
+  const n = seleccionadas?.size || 0
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+      <p style={{ margin: '0 0 6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+        Fotos encontradas — {n}/{imagenes.length} seleccionadas para guardar:
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {imagenes.map((url, i) => {
+          const isSel = seleccionadas?.has(url)
+          return (
+            <div
+              key={i}
+              onClick={() => onToggle(url)}
+              title={url.split('/').pop()}
+              style={{
+                position: 'relative', cursor: 'pointer',
+                border: `2px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-md)', overflow: 'hidden',
+                boxShadow: isSel ? '0 0 0 2px rgba(200,118,44,0.25)' : 'none',
+                transition: 'all 0.15s', opacity: isSel ? 1 : 0.5,
+              }}
+            >
+              <img
+                src={url}
+                alt={`foto ${i + 1}`}
+                style={{ width: 72, height: 72, objectFit: 'contain', background: '#fff', display: 'block' }}
+                onError={e => { e.target.style.display = 'none' }}
+              />
+              {isSel && (
+                <div style={{
+                  position: 'absolute', top: 3, right: 3,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: 'var(--accent)', color: '#fff',
+                  fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: '700',
+                }}>✓</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Products tab ───────────────────────────────────────────────────────────────
 
 const RES_COLS = '1fr 120px 95px 70px 105px 90px 80px'
@@ -896,7 +993,7 @@ function ProductsTab({ onToast }) {
 
   // Input state
   const [pastedText, setPastedText] = useState('')
-  const [defaultPct, setDefaultPct] = useState(30)
+  const [defaultPct, setDefaultPct] = useState(0)
   const [excelFile, setExcelFile] = useState(null)
   const excelRef = useRef()
 
@@ -1844,7 +1941,7 @@ function FlowTab({ onToast }) {
   const [productStocks, setProductStocks] = useState({})  // {product_id: stock}
   const [summary,     setSummary]     = useState(null)
   const [pastedText,  setPastedText]  = useState('')
-  const [defaultPct,  setDefaultPct]  = useState(30)
+  const [defaultPct,  setDefaultPct]  = useState(0)
   const [searchFile,  setSearchFile]  = useState(null)
   const [searchLoad,  setSearchLoad]  = useState(false)
   const [pageNum,     setPageNum]     = useState('')

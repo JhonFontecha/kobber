@@ -411,7 +411,7 @@ async def enhance_product(product_id: str):
 
     data = enhance_product_data_safe(
         nombre             = p["nombre"],
-        marca              = p.get("marca") or "TRUPER",
+        marca              = p.get("marca") or "",
         categoria          = p.get("categoria") or "",
         variantes          = variantes,
         descripcion_actual = p.get("descripcion") or "",
@@ -501,7 +501,7 @@ async def redescribe_all():
                 enhanced = await asyncio.to_thread(
                     enhance_product_data_safe,
                     p.get("nombre", ""),
-                    p.get("marca") or "TRUPER",
+                    p.get("marca") or "",
                     p.get("categoria") or "",
                     variantes,
                     p.get("descripcion") or "",

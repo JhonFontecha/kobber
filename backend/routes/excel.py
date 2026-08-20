@@ -143,7 +143,7 @@ def generate_ml_excel(body: MLExportRequest):
                 p.get("descripcion") or "",
                 p.get("categoria") or "",
                 "Mercado Envíos",
-                "Cuotas",
+                "Cuotas extra",
                 "Seleccionar",
                 "Seleccionar",
                 fotos_str,

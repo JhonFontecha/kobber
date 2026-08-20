@@ -229,6 +229,8 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
 - **Un solo modelo para descripción+títulos**: `enhance_product_data` (usado tanto en el import como en el botón manual `✨ Mejorar`) usa `claude-haiku-4-5-20251001` — revisar el modelo exacto en `catalog.py` porque cambia con el tiempo. No hay actualmente una ruta que use Opus.
 - **Precio de venta nunca se persiste**: siempre se calcula desde `precio_distribuidor` + margen al momento de leer, tanto en `products.py` como en `store.py`.
 - **Ortografía de marca**: la marca se escribe `"Truper"` (una sola P) — no `"Trupper"`. Aparece así en prompts (extracción, enhance), exports de Excel y el dominio de imágenes (`truper.com`). El PDF fuente puede tener la marca mal escrita o ambigua; el prompt de extracción exige copiar la marca EXACTAMENTE como aparece impresa en cada página, sin asumir ni heredar de otra página.
+- **Cuotas**: el campo "Cuotas" en las plantillas/exports ML siempre se llena con `"Cuotas extra"`, nunca `"Cuotas"` a secas — regla de negocio fija, no queda a criterio de Claude (`analyzer.py` → `fill_blank_template`, `excel.py` → `generate_ml_excel`).
+- **Pulgadas**: el número va pegado al símbolo `"`, sin espacio (`9"`, `8"`, `3"`, `1/2"` — nunca `9 "`). Aplica en cualquier punto donde Claude genera o normaliza texto de producto: `catalog.py` → `EXTRACTION_PROMPT` (nombre/descripción al capturar del catálogo) y `ENHANCE_PROMPT` (descripción y títulos sugeridos).
 
 ## Problemas conocidos / deuda técnica
 

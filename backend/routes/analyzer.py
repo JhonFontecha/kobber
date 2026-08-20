@@ -1549,10 +1549,10 @@ async def fill_blank_template(
                         ws.cell(first_empty, cols["fotos"]).value = fotos_str
 
                     # "Cuotas" no es un campo estándar (no está en `cols`, se detecta
-                    # como atributo dinámico) — regla de negocio: siempre "Cuotas", no
-                    # "Cuotas extra". Escribirlo acá evita que quede a criterio de Claude.
+                    # como atributo dinámico) — regla de negocio: siempre "Cuotas extra",
+                    # no "Cuotas". Escribirlo acá evita que quede a criterio de Claude.
                     if "cuotas" in attr_cols:
-                        ws.cell(first_empty, attr_cols["cuotas"]).value = "Cuotas"
+                        ws.cell(first_empty, attr_cols["cuotas"]).value = "Cuotas extra"
 
                     # Atributos específicos de la categoría
                     for attr_name_l, attr in all_attrs.items():
