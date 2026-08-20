@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import zipfile
 from collections import defaultdict
 from typing import Optional
 
@@ -12,6 +13,7 @@ import openpyxl
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import column_index_from_string
 
 from config import ANTHROPIC_API_KEY
 from database import get_client
@@ -167,7 +169,61 @@ _ML_FIELD_KEYWORDS: dict[str, list[str]] = {
     "modelo":           ["modelo"],
     "costo_envio":      ["costo de envío", "costo de envio"],
     "retiro_persona":   ["retiro en persona"],
+    "formato_venta":    ["formato de venta"],
 }
+
+_PACK_KEYWORDS_RE = re.compile(
+    r"\b(kit|set|juego|combo|dueto|d[uú]o|tr[ií]o|paquete|pack|surtido)\b", re.IGNORECASE
+)
+_PACK_COUNT_RE = re.compile(r"\b(\d+)\s*(pzas?|piezas?|unidades?|pares?)\b", re.IGNORECASE)
+
+
+def _limpiar_filas(ws, desde: int, hasta: int) -> None:
+    """
+    Vacía por completo las filas [desde, hasta] (inclusive) de una hoja. La
+    plantilla en blanco de ML trae valores "fantasma" (ej. "Nuevo", "Escribe o
+    elige un valor") precargados en muchas filas de datos aunque no haya
+    producto — hay que borrarlos, no alcanza con no escribir nada encima.
+    """
+    for row in range(desde, hasta + 1):
+        for col in range(1, ws.max_column + 1):
+            ws.cell(row, col).value = None
+
+
+def _coerce_numero(valor):
+    """
+    Si el valor es puramente numérico (ej. "27", "1.5"), lo devuelve como int/float
+    para que Excel lo guarde como celda numérica de verdad — ML valida columnas como
+    Largo o Cantidad como tipo decimal/entero y puede rechazarlas si llegan como
+    texto. Si trae unidad u otro texto (ej. "27 mm"), se deja tal cual como string.
+    """
+    s = str(valor).strip()
+    if not s:
+        return valor
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    s_norm = s.replace(",", ".")
+    if re.fullmatch(r"-?\d+\.\d+", s_norm):
+        return float(s_norm)
+    return valor
+
+
+def _detectar_formato_venta(nombre: str) -> str:
+    """
+    Regla de negocio: por defecto se vende por Unidad. Sólo es Pack cuando el
+    nombre indica explícitamente un set/kit/combo, o una cantidad >1 (ej. "3
+    piezas"). Productos vendidos por peso/kilo (ej. soldadura, tornillos a
+    granel) NO son Pack sólo por contener muchas piezas físicas — la unidad de
+    venta sigue siendo la bolsa/rollo/kilo, no cada pieza individual.
+    """
+    if not nombre:
+        return "Unidad"
+    if _PACK_KEYWORDS_RE.search(nombre):
+        return "Pack"
+    m = _PACK_COUNT_RE.search(nombre)
+    if m and int(m.group(1)) > 1:
+        return "Pack"
+    return "Unidad"
 
 
 def _ml_col_map(ws) -> dict[str, int]:
@@ -194,6 +250,91 @@ def _ml_col_map(ws) -> dict[str, int]:
             best_map  = col_map
 
     return best_map
+
+
+_XM_F_RE   = re.compile(r"'([^']+)'!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)")
+_SHEET_RE  = re.compile(r'<sheet[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"')
+_RELID_RE  = re.compile(r'<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"')
+
+
+def _extract_dropdown_options(ml_bytes: bytes, sheet_name: str) -> dict[int, list[str]]:
+    """
+    Lee las listas desplegables reales de una hoja de categoría de la plantilla ML.
+    openpyxl no soporta la extensión x14:dataValidation que usa ML (ver warning al
+    cargar el workbook), así que se parsea el XML crudo del .xlsx directamente.
+
+    Cada columna con dropdown define un <x14:dataValidation type="list"> cuyo
+    formula1 apunta a una fila de la hoja oculta "extra info" (ej. "'extra info'!
+    $A$2:$B$2") — ahí están los valores válidos reales. Devuelve {columna: [valores]}.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(ml_bytes)) as z:
+            workbook_xml = z.read("xl/workbook.xml").decode("utf-8", errors="ignore")
+            rels_xml     = z.read("xl/_rels/workbook.xml.rels").decode("utf-8", errors="ignore")
+
+            rid_to_target = dict(_RELID_RE.findall(rels_xml))
+            sheet_file = None
+            for name, rid in _SHEET_RE.findall(workbook_xml):
+                if name == sheet_name:
+                    target = rid_to_target.get(rid)
+                    if target:
+                        sheet_file = "xl/" + target.lstrip("/")
+                    break
+            if not sheet_file or sheet_file not in z.namelist():
+                return {}
+
+            sheet_xml = z.read(sheet_file).decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"[dropdown_options] no se pudo leer el xlsx: {e}")
+        return {}
+
+    # Hoja "extra info" — filas de valores válidos referenciadas por los dropdowns
+    try:
+        wb_extra = openpyxl.load_workbook(io.BytesIO(ml_bytes), data_only=True)
+        ws_extra = wb_extra["extra info"] if "extra info" in wb_extra.sheetnames else None
+    except Exception:
+        ws_extra = None
+    if ws_extra is None:
+        return {}
+
+    result: dict[int, list[str]] = {}
+    blocks = re.findall(r"<x14:dataValidation\b.*?</x14:dataValidation>", sheet_xml, re.DOTALL)
+
+    for block in blocks:
+        if 'type="list"' not in block:
+            continue
+        sqref_m = re.search(r"<xm:sqref>(.*?)</xm:sqref>", block)
+        f1_m    = re.search(r"<x14:formula1>(.*?)</x14:formula1>", block, re.DOTALL)
+        if not sqref_m or not f1_m:
+            continue
+
+        ref_m = _XM_F_RE.search(f1_m.group(1))
+        if not ref_m or ref_m.group(1) != "extra info":
+            continue
+        _, col_a, row_a, col_b, row_b = ref_m.groups()
+        if row_a != row_b:
+            continue  # sólo soportamos listas en una sola fila (el caso real de ML)
+
+        c1 = column_index_from_string(col_a)
+        c2 = column_index_from_string(col_b)
+        valores = [
+            str(ws_extra.cell(int(row_a), c).value).strip()
+            for c in range(c1, c2 + 1)
+            if ws_extra.cell(int(row_a), c).value not in (None, "")
+        ]
+        # Placeholders de ML, no son opciones reales
+        _PLACEHOLDERS = {"escribe o elige un valor", "seleccionar"}
+        valores = [v for v in valores if v.lower() not in _PLACEHOLDERS]
+        if not valores:
+            continue
+
+        # sqref puede tener varios rangos separados por espacio ("D9:D16 F9:F16")
+        for rango in sqref_m.group(1).split():
+            col_letra = re.match(r"([A-Z]+)", rango)
+            if col_letra:
+                result[column_index_from_string(col_letra.group(1))] = valores
+
+    return result
 
 
 def _parse_ml_file(content: bytes) -> list[dict]:
@@ -1066,14 +1207,27 @@ async def ml_login():
 
 ATTR_INFER_PROMPT = """\
 Eres experto en ferreteria y herramientas de las marcas Truper, Pretul y FIERO \
-para MercadoLibre Colombia.
+para MercadoLibre Colombia. Conoces las especificaciones tecnicas tipicas que \
+publica el fabricante para estas lineas de producto.
 
-Para cada producto de la lista completa los atributos vacios de la plantilla ML \
-usando tu conocimiento tecnico del producto. Devuelve null para atributos que no \
-apliquen o que no puedas confirmar con certeza. No inventes datos.
+Para cada producto de la lista, completa TODOS los atributos vacios de la plantilla \
+ML que puedas inferir con tu conocimiento tecnico real de la linea — no te limites \
+a lo que esta escrito literal en la descripcion, usa lo que sabes de productos \
+Truper/Pretul/FIERO reales de esa categoria, esas caracteristicas y esos atributos \
+ya conocidos. Devuelve null UNICAMENTE para atributos que genuinamente no apliquen \
+a este tipo de producto (ej. "color de mango" en una herramienta sin mango) — no \
+por falta de certeza absoluta, una estimacion tecnica razonable es mejor que dejarlo \
+vacio.
 
-Columnas a completar (nombres exactos de la plantilla):
-{attr_names}
+Algunas columnas tienen una lista de valores permitidos (van junto al nombre de la \
+columna abajo). Si una columna tiene lista, tu respuesta para esa columna DEBE ser \
+exactamente uno de esos valores, copiado tal cual — no lo traduzcas, no lo abrevies, \
+no inventes uno nuevo. Si ninguno describe perfecto el producto, elegi el mas \
+cercano en vez de devolver null.
+
+Columnas a completar — cada una con su lista de opciones validas si la tiene, o \
+"texto libre" si no:
+{attr_specs}
 
 Productos (en el mismo orden en que debes responder):
 {products_json}
@@ -1090,51 +1244,83 @@ def _fill_attrs_claude(
     rows: list[dict],
     attr_cols: dict[str, int],
     client: anthropic.Anthropic,
+    attr_options: dict[str, list[str]] | None = None,
 ) -> None:
-    """Llena columnas de atributos vacías usando Claude. No sobreescribe celdas con valor."""
+    """
+    Llena columnas de atributos vacías usando Claude. No sobreescribe celdas con
+    valor. `attr_options` (nombre de atributo → lista de valores válidos, extraída
+    de los dropdowns reales de la plantilla) restringe la respuesta a esos valores
+    cuando existen — evita que Claude invente un string que ML no acepta.
+    """
     if not rows or not attr_cols:
         return
 
-    attr_names = list(attr_cols.keys())
+    attr_options = attr_options or {}
+    attr_names   = list(attr_cols.keys())
+    attr_specs   = {
+        name: attr_options.get(name) or "texto libre (numero, medida u otro valor breve)"
+        for name in attr_names
+    }
+    # Sets en minúsculas para validar contra la lista real sin problemas de mayúsculas
+    valid_lower = {
+        name: {v.lower() for v in opts}
+        for name, opts in attr_options.items()
+    }
     BATCH = 8
 
     for i in range(0, len(rows), BATCH):
         batch = rows[i : i + BATCH]
         products_input = [
             {
-                "nombre":      r["nombre"],
-                "marca":       r["marca"],
-                "categoria":   r["categoria"],
-                "descripcion": r["descripcion"],
+                "nombre":       r["nombre"],
+                "marca":        r["marca"],
+                "categoria":    r["categoria"],
+                "clave":        r.get("clave", ""),
+                "descripcion":  r["descripcion"],
+                "caracteristicas": r.get("caracteristicas") or [],
+                "atributos_ya_conocidos": r.get("atributos_conocidos") or {},
             }
             for r in batch
         ]
-        try:
-            prompt = ATTR_INFER_PROMPT.format(
-                attr_names=json.dumps(attr_names, ensure_ascii=False),
-                products_json=json.dumps(products_input, ensure_ascii=False),
-            )
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = msg.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
-            inferred: list[dict] = json.loads(raw)
+        prompt = ATTR_INFER_PROMPT.format(
+            attr_specs=json.dumps(attr_specs, ensure_ascii=False),
+            products_json=json.dumps(products_input, ensure_ascii=False),
+        )
 
-            for row_ctx, attrs in zip(batch, inferred):
-                if not isinstance(attrs, dict):
+        inferred: list[dict] | None = None
+        for intento in range(2):
+            try:
+                msg = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=3000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = msg.content[0].text.strip()
+                if raw.startswith("```"):
+                    raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+                inferred = json.loads(raw)
+                break
+            except Exception as e:
+                print(f"[fill_attrs_claude] batch {i} intento {intento+1}: {e}")
+
+        if inferred is None:
+            print(f"[fill_attrs_claude] batch {i}: se perdieron {len(batch)} productos tras reintentar")
+            continue
+
+        for row_ctx, attrs in zip(batch, inferred):
+            if not isinstance(attrs, dict):
+                continue
+            for attr_name, value in attrs.items():
+                if value is None or str(value).strip().lower() in ("null", "no aplica", ""):
                     continue
-                for attr_name, value in attrs.items():
-                    if value is None or str(value).strip().lower() in ("null", "no aplica", ""):
-                        continue
-                    col = attr_cols.get(attr_name)
-                    if col and not ws.cell(row_ctx["row_num"], col).value:
-                        ws.cell(row_ctx["row_num"], col).value = str(value)
-        except Exception as e:
-            print(f"[fill_attrs_claude] batch {i}: {e}")
+                value = str(value).strip()
+                # Si la columna tiene lista de valores válidos, exigir que coincida
+                opciones = valid_lower.get(attr_name)
+                if opciones is not None and value.lower() not in opciones:
+                    continue
+                col = attr_cols.get(attr_name)
+                if col and not ws.cell(row_ctx["row_num"], col).value:
+                    ws.cell(row_ctx["row_num"], col).value = _coerce_numero(value)
 
 
 # ── Rellenar plantilla vacía con productos de BD ──────────────────────────────
@@ -1277,6 +1463,14 @@ async def fill_blank_template(
 
         attr_cols, unit_cols = _attr_col_maps(ws)
 
+        # Opciones válidas de dropdown (columna → valores) → nombre de atributo → valores
+        dropdown_by_col = _extract_dropdown_options(ml_bytes, hoja)
+        attr_options = {
+            name: dropdown_by_col[col]
+            for name, col in attr_cols.items()
+            if col in dropdown_by_col
+        }
+
         rows_for_inference: list = []   # filas escritas en esta hoja para inferencia Claude
 
         # Primera fila vacía de datos
@@ -1309,7 +1503,6 @@ async def fill_blank_template(
 
             for v in (p.get("product_variants") or []):
                 clave  = str(v.get("clave") or "").strip()
-                nc     = str(v.get("nc") or "").strip()
                 precio = v.get("precio_distribuidor")
                 if precio and margen:
                     precio = round(precio * (1 + margen / 100), 2)
@@ -1343,13 +1536,23 @@ async def fill_blank_template(
                     stock_val = stocks_map.get(str(p["id"]), stocks_map.get(p["id"], 100))
                     w("stock", int(stock_val) if stock_val is not None else 100)
                     w("condicion",        "Nuevo")
-                    w("codigo_universal", "Otra razón")
+                    w("formato_venta",    _detectar_formato_venta(p.get("nombre", "")))
+                    # "Código universal de producto" siempre va vacío: no es lo mismo que
+                    # el NC (cantidad por empaque) y Kobber no tiene EAN/UPC/GTIN reales
+                    # cargados. "Otra razón" tampoco es válido — ML rechaza la fila entera
+                    # si se manda cualquier valor que no sea un código real.
                     w("costo_envio",      "A cargo del comprador")
                     w("retiro_persona",   "No acepto")
                     if precio is not None:
                         w("precio", precio)
                     if "fotos" in cols and fotos_str:
                         ws.cell(first_empty, cols["fotos"]).value = fotos_str
+
+                    # "Cuotas" no es un campo estándar (no está en `cols`, se detecta
+                    # como atributo dinámico) — regla de negocio: siempre "Cuotas", no
+                    # "Cuotas extra". Escribirlo acá evita que quede a criterio de Claude.
+                    if "cuotas" in attr_cols:
+                        ws.cell(first_empty, attr_cols["cuotas"]).value = "Cuotas"
 
                     # Atributos específicos de la categoría
                     for attr_name_l, attr in all_attrs.items():
@@ -1364,7 +1567,7 @@ async def fill_blank_template(
                                     target_col = col_num
                                     break
                         if target_col:
-                            ws.cell(first_empty, target_col).value = valor
+                            ws.cell(first_empty, target_col).value = _coerce_numero(valor)
                             if unidad:
                                 unit_col = unit_cols.get(attr_name_l)
                                 if not unit_col:
@@ -1375,12 +1578,22 @@ async def fill_blank_template(
                                 if unit_col:
                                     ws.cell(first_empty, unit_col).value = unidad
 
+                    atributos_conocidos = {
+                        attr.get("nombre", attr_name_l): (
+                            f"{attr.get('valor', '')} {attr.get('unidad', '')}".strip()
+                        )
+                        for attr_name_l, attr in all_attrs.items()
+                        if attr.get("valor")
+                    }
                     rows_for_inference.append({
                         "row_num":    first_empty,
                         "nombre":     p.get("nombre", ""),
                         "marca":      p.get("marca", ""),
                         "categoria":  p.get("categoria_ml", ""),
-                        "descripcion": (p.get("descripcion") or "")[:300],
+                        "clave":      clave,
+                        "descripcion": p.get("descripcion") or "",
+                        "caracteristicas": p.get("caracteristicas") or [],
+                        "atributos_conocidos": atributos_conocidos,
                     })
                     first_empty += 1
                     total_filas += 1
@@ -1391,11 +1604,18 @@ async def fill_blank_template(
                     "hoja":   hoja,
                 })
 
-                # Fila en blanco separadora entre variantes
+                # Fila en blanco separadora entre variantes — vaciarla, la plantilla
+                # trae valores fantasma precargados ahí aunque no haya producto
+                _limpiar_filas(ws, first_empty, first_empty)
                 first_empty += 1
 
+        # Todo lo que quede después del último producto real de esta hoja también
+        # trae valores fantasma de la plantilla — vaciar hasta el final de lo usado
+        if ws.max_row >= first_empty:
+            _limpiar_filas(ws, first_empty, ws.max_row)
+
         # Inferir atributos vacíos con Claude para todas las filas de esta hoja
-        _fill_attrs_claude(ws, rows_for_inference, attr_cols, ai_client)
+        _fill_attrs_claude(ws, rows_for_inference, attr_cols, ai_client, attr_options)
 
     import base64 as _b64
     resumen = _b64.b64encode(json.dumps({

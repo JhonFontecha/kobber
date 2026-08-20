@@ -78,13 +78,17 @@ async def _scrape_banco(clave: str, client: httpx.AsyncClient) -> dict:
 
 
 def _build_candidates(clave: str) -> list[str]:
+    """
+    Sufijos de Trupper: "FC" = foto de característica (producto real, con textos
+    superpuestos) y "D" = detalle — ambos válidos. "EI" = Empaque Inner (caja máster)
+    y "EIND" = Empaque INDividual (blister de venta) — son fotos de la caja, no del
+    producto, y Kobber nunca envía en ese empaque original. No se buscan.
+    """
     clave = clave.replace("/", "-")
     candidates = [f"{BASE_URL}{clave}.jpg"]
     for n in range(1, MAX_VARS + 1):
         candidates.append(f"{BASE_URL}{clave}+FC{n}.jpg")
         candidates.append(f"{BASE_URL}{clave}+D{n}.jpg")
-        candidates.append(f"{BASE_URL}{clave}+EI{n}.jpg")
-        candidates.append(f"{BASE_URL}{clave}+EIND{n}.jpg")
     return candidates
 
 

@@ -166,11 +166,11 @@ REGLAS:
 9. Sin acentos ni tildes en los titulos (ML los indexa mejor sin ellos).
 10. No uses palabras de relleno sin valor de busqueda (profesional, calidad, nuevo, garantia).
 
-EJEMPLO para un alicate de electricista 9 pulgadas cromo vanadio Trupper (catalogo dice "perico"):
-  "Alicate Electricista Trupper 9 Cromo Vanadio"    46 chars OK
-  "Pinzas Electricista Trupper Alta Palanca Cr-V"   45 chars OK
-  "Tenaza Electricista Trupper 9 Pulgadas Acero"    45 chars OK
-  "Cortafrio Electricista Trupper Palanca ASME"     44 chars OK
+EJEMPLO para un alicate de electricista 9 pulgadas cromo vanadio Truper (catalogo dice "perico"):
+  "Alicate Electricista Truper 9 Cromo Vanadio"     45 chars OK
+  "Pinzas Electricista Truper Alta Palanca Cr-V"    45 chars OK
+  "Tenaza Electricista Truper 9 Pulgadas Acero"     44 chars OK
+  "Cortafrio Electricista Truper Palanca ASME"      43 chars OK
 
 Responde UNICAMENTE con este JSON (sin markdown):
 {{
@@ -266,7 +266,7 @@ async def _enhance_one(p: dict, page_num: int | None = None) -> None:
     async with _ENHANCE_SEM:
         enhanced = await asyncio.to_thread(
             enhance_product_data_safe,
-            p.get("nombre", ""), p.get("marca", "TRUPPER"),
+            p.get("nombre", ""), p.get("marca", "TRUPER"),
             p.get("categoria", ""), p.get("variantes", []),
             p.get("descripcion", ""), p.get("caracteristicas", []), all_attrs,
         )
@@ -324,28 +324,7 @@ def enhance_product_data_safe(nombre, marca, categoria, variantes, descripcion_a
     return best  # Devuelve lo mejor que se pudo obtener
 
 
-def _explode_variants(product: dict) -> list[dict]:
-    """
-    Convierte un producto con N variantes en N productos independientes,
-    cada uno con una sola variante. El nombre lleva la descripción de la variante.
-    """
-    variantes = product.get("variantes") or []
-    if len(variantes) <= 1:
-        return [product]
-
-    nombre_base = (product.get("nombre") or "").strip()
-    base        = {k: v for k, v in product.items() if k != "variantes"}
-
-    result = []
-    for v in variantes:
-        desc   = (v.get("descripcion") or "").strip()
-        nombre = f"{nombre_base} {desc}".strip() if desc else nombre_base
-        result.append({**base, "nombre": nombre, "variantes": [v]})
-
-    return result
-
-
-EXTRACTION_PROMPT = """Eres un experto en catálogos de herramientas Trupper. Tu tarea es extraer TODOS los productos visibles en esta página con máxima precisión, especialmente en los precios.
+EXTRACTION_PROMPT = """Eres un experto en catálogos de herramientas Truper. Tu tarea es extraer TODOS los productos visibles en esta página con máxima precisión, especialmente en los precios.
 
 ════════════════════════════════════════
 REGLAS CRÍTICAS PARA PRECIOS — LEE ESTO PRIMERO
@@ -410,7 +389,11 @@ ESTRUCTURA A EXTRAER
 Para cada familia de producto devuelve:
 - nombre: nombre completo de la familia (ej: "Alicates de electricista con jalacables")
 - descripcion: descripción larga con usos y características técnicas
-- marca: "TRUPPER" o "PRETUL" según sea visible, o null
+- marca: la marca EXACTAMENTE como aparece impresa en la página (ej: "TRUPER", "PRETUL",
+  "FIERO"), respetando su ortografía real — "TRUPER" se escribe con una sola P, NO
+  "TRUPPER". El catálogo puede incluir más de una marca; no asumas que todo es TRUPER.
+  Si la marca no es visible en esa página, usa null — no inventes ni copies la marca de
+  otra página.
 - categoria: categoría principal (ej: "Alicates")
 - subcategoria: subcategoría si existe, o null
 - seccion: letra de sección visible en la página (ej: "C", "E", "J", "L"), o null
