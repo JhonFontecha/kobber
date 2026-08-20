@@ -86,7 +86,7 @@ FastAPI (`main.py`), seis routers:
 | `catalog.py` | `/api/catalog` | PDF → Claude Vision → extracción de productos; guarda en Supabase con descripción IA + fetch de imágenes en background |
 | `products.py` | `/api/products` | CRUD de productos/variantes, búsqueda por código/Excel, backfill de `categoria_ml`, endpoint `✨ enhance` con Claude |
 | `excel.py` | `/api/excel` | Genera Excel formato Kobber y Excel de carga masiva ML a partir de datos de la BD |
-| `images.py` | `/api/images` | Trae imágenes de producto desde Trupper.com (URL directa + scraping de BancoContenidoDigital) |
+| `images.py` | `/api/images` | Trae imágenes de producto desde Truper.com (URL directa + scraping de BancoContenidoDigital) |
 | `analyzer.py` | `/api/analyzer` | Llena plantillas ML en blanco con datos de la BD; detecta layout de columnas ML dinámicamente por hoja; automatiza login/scraping de ML vía Playwright |
 | `store.py` | `/api/store` | Lee productos con precio de venta calculado (margen aplicado) para la tienda pública — **es lo que consume el frontend de tienda** |
 
@@ -95,10 +95,9 @@ FastAPI (`main.py`), seis routers:
 - `catalog.enhance_product_data(...)` — llama Claude (Haiku) para generar descripciones en formato universal; `enhance_product_data_safe` nunca lanza excepción
 - `database.get_client()` — cliente Supabase singleton, usa `service_role` key si está seteada (si no, cae a `anon` y queda sujeto a RLS)
 
-**⚠️ Código duplicado a limpiar:** `products.py` tiene endpoints `GET /api/products/tienda` y
-`GET /api/products/tienda/{id}` que duplican casi línea por línea la lógica de `store.py`
-(`GET /api/store/productos`). El frontend (`src/tienda/hooks/useStoreProducts.js`) sólo llama a
-`/api/store/productos` — los de `products.py` parecen no tener consumidor y son candidatos a eliminar.
+Los endpoints `GET /api/products/tienda` y `GET /api/products/tienda/{id}` que duplicaban la lógica
+de `store.py` fueron eliminados de `products.py` (agosto 2026) — sin consumidor, el frontend siempre
+llamó sólo a `/api/store/productos`.
 
 ### Base de datos (Supabase — Postgres + Storage)
 
@@ -141,6 +140,29 @@ Los Excel de ML tienen layouts de columna distintos por categoría. `analyzer._m
 las filas 2–5 y elige la fila con más coincidencias de keywords como header — soporta formatos viejos
 (headers en fila 4) y nuevos (headers en fila 3).
 
+### Inferencia de atributos con Claude en `fill-blank-template`
+
+`analyzer._fill_attrs_claude` completa columnas de atributos vacías con Claude (Haiku) para las filas
+que `fill-blank-template` acaba de escribir. Detalles no obvios:
+
+- `analyzer._extract_dropdown_options(ml_bytes, sheet_name)` parsea el XML crudo del `.xlsx` (openpyxl
+  no soporta la extensión `x14:dataValidation` que usa ML) para sacar las listas desplegables reales
+  de cada columna, referenciadas en la hoja oculta `"extra info"`. Esas opciones se pasan a Claude en
+  el prompt y la respuesta se valida contra ellas — si Claude devuelve un valor que no está en la
+  lista, se descarta en vez de escribirse (ML rechaza filas con valores de dropdown inválidos).
+- `analyzer._coerce_numero` convierte valores puramente numéricos a `int`/`float` antes de escribirlos
+  — columnas como Largo o Cantidad son de tipo decimal/entero en ML y pueden rechazar strings.
+- `analyzer._limpiar_filas` vacía explícitamente las filas separadoras entre variantes y todo lo que
+  queda después del último producto de cada hoja — la plantilla en blanco de ML trae valores
+  "fantasma" (ej. `"Nuevo"`, `"Escribe o elige un valor"`) precargados en filas de datos vacías, no
+  alcanza con no escribir nada encima.
+- `analyzer._detectar_formato_venta` decide `"Unidad"` vs `"Pack"` por el nombre del producto (keywords
+  tipo kit/set/combo, o una cantidad >1 explícita) — ver docstring para el caso borde de productos por
+  peso/granel que no son Pack aunque tengan muchas piezas físicas.
+- La columna `"Código universal de producto"` se deja siempre vacía — no existe EAN/UPC/GTIN real
+  cargado en la BD y cualquier valor no-código (incluyendo el viejo `"Otra razón"`) hace que ML
+  rechace la fila entera.
+
 ### Frontend — Panel admin (`src/App.jsx`, ~2770 líneas, componente único)
 
 Componentes/tabs principales (todo en un solo archivo):
@@ -148,9 +170,8 @@ Componentes/tabs principales (todo en un solo archivo):
 - **FlowTab** — publicador ML en 4 pasos: buscar productos → descargar plantillas (scraper Playwright) → subir plantilla → llenar con datos de BD
 - **ProductsTab** — búsqueda por código/clave o carga de Excel; edición inline; botón `✨ Mejorar` dispara enhance de Claude, incluidos los títulos sugeridos por variante (editables, ver abajo)
 - **ImportTab** — subida de PDF → extracción streaming (SSE) → revisión → guardar (las descripciones y títulos sugeridos se generan durante la extracción, editables antes de guardar)
-- **ImagesTab** — explorar/guardar imágenes de Trupper; "↻ Sincronizar faltantes" trae imágenes sólo para productos sin ninguna
+- **ImagesTab** — explorar/guardar imágenes de Truper; "↻ Sincronizar faltantes" trae imágenes sólo para productos sin ninguna
 - **AnalyzeTab** — subir plantilla ML en blanco → `fill-blank-template` la llena usando `categoria_ml` de la BD
-- **ExportTab** — generación de Excel (Kobber / ML)
 
 ### Frontend — Tienda pública (`src/tienda/`)
 
@@ -207,10 +228,10 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
 - **Títulos de variante**: ML requiere el mismo título para todas las variantes de un producto (según la hoja Ayuda).
 - **Un solo modelo para descripción+títulos**: `enhance_product_data` (usado tanto en el import como en el botón manual `✨ Mejorar`) usa `claude-haiku-4-5-20251001` — revisar el modelo exacto en `catalog.py` porque cambia con el tiempo. No hay actualmente una ruta que use Opus.
 - **Precio de venta nunca se persiste**: siempre se calcula desde `precio_distribuidor` + margen al momento de leer, tanto en `products.py` como en `store.py`.
+- **Ortografía de marca**: la marca se escribe `"Truper"` (una sola P) — no `"Trupper"`. Aparece así en prompts (extracción, enhance), exports de Excel y el dominio de imágenes (`truper.com`). El PDF fuente puede tener la marca mal escrita o ambigua; el prompt de extracción exige copiar la marca EXACTAMENTE como aparece impresa en cada página, sin asumir ni heredar de otra página.
 
 ## Problemas conocidos / deuda técnica
 
-- Endpoints duplicados `/api/products/tienda*` vs `/api/store/productos*` (ver arriba) — limpiar cuando se toque `products.py` o `store.py`.
 - Login de tienda (`LoginPage.jsx`) no es autenticación real — credenciales hardcodeadas en el frontend, visibles en el bundle. No usar para proteger nada sensible sin reemplazarlo primero.
 - `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
 - `playwright` está en `requirements.txt`. En macOS 13 (Ventura) `playwright install chromium` **falla** —
