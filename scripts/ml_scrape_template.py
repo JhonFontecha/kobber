@@ -12,7 +12,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 SESSION_FILE = "/tmp/ml_session.json"
-DOWNLOAD_DIR = Path("/Users/jhon/Downloads")
+DOWNLOAD_DIR = Path.home() / "Downloads"
 URL          = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
 # ── Overrides manuales: cuando la API clasifica mal ──────────────────────────
