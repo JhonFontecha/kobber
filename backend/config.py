@@ -11,7 +11,10 @@ SUPABASE_KEY         = os.getenv("SUPABASE_KEY", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
 _storage_raw = os.getenv("STORAGE_PATH", "./storage")
-STORAGE_PATH = Path(_storage_raw).expanduser().resolve()
+STORAGE_PATH = Path(_storage_raw).expanduser()
+if not STORAGE_PATH.is_absolute():
+    STORAGE_PATH = Path(__file__).parent / STORAGE_PATH
+STORAGE_PATH = STORAGE_PATH.resolve()
 EXPORTS_PATH = STORAGE_PATH / "exports"
 
 def init_storage():

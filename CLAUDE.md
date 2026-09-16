@@ -190,8 +190,8 @@ Diseño: Tailwind con paleta custom "graphite" (ver `tailwind.config.js`), estil
 
 Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backend, invocados manualmente):
 
-1. `ml_login.py` — abre browser para login manual, guarda sesión en `/tmp/ml_session.json`
-2. `ml_scrape_template.py` — usa la sesión guardada para buscar categorías y descargar la plantilla; `--file /tmp/productos.txt` o lista de productos como args. Tiene `CATEGORY_OVERRIDES` y `SIN_CATEGORIA_ML` hardcodeados para casos donde la clasificación automática de ML falla.
+1. `ml_login.py` — abre browser para login manual, guarda sesión en `.kobber/mercadolibre/ml_session.json`
+2. `ml_scrape_template.py` — usa la sesión guardada para buscar categorías y descargar la plantilla; `--file productos.txt` o lista de productos como args. Tiene `CATEGORY_OVERRIDES` y `SIN_CATEGORIA_ML` hardcodeados para casos donde la clasificación automática de ML falla.
 3. `ml_inspect.py` — utilidad de debug para inspeccionar selectores de la página de ML
 
 Correr desde la raíz del repo: `backend/venv/bin/python3 scripts/<script>.py`.
@@ -235,7 +235,7 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
 ## Problemas conocidos / deuda técnica
 
 - Login de tienda (`LoginPage.jsx`) no es autenticación real — credenciales hardcodeadas en el frontend, visibles en el bundle. No usar para proteger nada sensible sin reemplazarlo primero.
-- `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
+- `requirements.txt` usa `Pillow==12.3.0`, compatible con Python 3.14; no volver al pin 11.1.0.
 - `playwright` está en `requirements.txt`. En macOS 13 (Ventura) `playwright install chromium` **falla** —
   Playwright dejó de dar soporte a Chromium en ese OS — por eso todos los `chromium.launch(...)` del
   proyecto (`analyzer.py` x2, `scripts/ml_login.py`, `ml_scrape_template.py`, `ml_inspect.py`) pasan
@@ -243,3 +243,25 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
   Requiere tener Chrome instalado — si no está, instalarlo desde google.com/chrome, no correr
   `playwright install`.
 - El servidor de búsqueda pública de ML (`api.mercadolibre.com/sites/MCO/search` y `/products/search`) ahora devuelve 403 (`PolicyAgent`, firewall anti-bot) para requests sin sesión — incluso navegando con un browser real headless. Sólo `domain_discovery` (usado por `get_ml_category`) sigue público. Cualquier feature que necesite traer resultados de búsqueda reales de ML requiere sesión logueada vía Playwright (`ml_login.py`) o una app OAuth propia registrada en developers.mercadolibre.com — no hay atajo sin eso.
+
+
+## Control local multiplataforma
+
+`README.md` contiene el procedimiento actualizado para Windows/macOS. `scripts/kobber.py`
+implementa instalar/iniciar/detener/estado/actualizar; los wrappers de `scripts/windows/*.ps1` y
+`scripts/macos/*.sh` llaman al mismo controlador `scripts/kobber.py` mediante rutas relativas
+a su propia ubicación, sin depender del directorio actual. Base: Python 3.14 y Node.js 24 LTS. La interfaz se sirve compilada con Vite preview
+(sólo uso local, no hosting de producción) y el backend usa Uvicorn sin reload, ambos en loopback.
+Un supervisor en segundo plano conserva sus procesos hijos y recibe una señal por archivo para
+pararlos, sin recurrir a PIDs persistidos que pudieran pertenecer a otra aplicación.
+En Windows se termina el árbol del proceso hijo porque el ejecutable del venv puede lanzar otro Python.
+
+`.kobber/` contiene estado, logs y `mercadolibre/` (cookies, capturas, plan y descargas); está ignorado
+por Git. `backend/local_paths.py` resuelve estos archivos para backend y scripts y normaliza nombres
+para Windows. El scraper se invoca con `sys.executable`, heredando el entorno del backend y UTF-8.
+`STORAGE_PATH` relativo se resuelve contra `backend/`, independientemente del cwd.
+`KOBBER_PORT`/`KOBBER_API_PORT` opcionales cambian puertos, CORS y proxy; defaults 5173/8000.
+El instalador conserva `.env`. Actualizar requiere servidores detenidos y Git limpio; hace pull
+fast-forward de la rama actual y ejecuta el instalador actualizado, sin push ni reset automático.
+La comprobación de arranque no valida servicios externos. El login interactivo de ML requiere Chrome.
+El workflow `portable.yml` comprueba instalación, tests e inicio/parada en Windows y macOS al publicarse.

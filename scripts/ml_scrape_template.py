@@ -4,15 +4,19 @@
 3. La agrega al listado y descarga la plantilla con todas.
 
 Corre con:
-  python3 scripts/ml_scrape_template.py --file /tmp/productos.txt
+  python3 scripts/ml_scrape_template.py --file productos.txt
   python3 scripts/ml_scrape_template.py "Producto 1" "Producto 2" ...
 """
 import sys, ssl, time, json, urllib.request, urllib.parse
 from pathlib import Path
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from local_paths import ml_path
 from playwright.sync_api import sync_playwright
 
-SESSION_FILE = "/tmp/ml_session.json"
-DOWNLOAD_DIR = Path.home() / "Downloads"
+SESSION_FILE = ml_path("ml_session.json")
+DOWNLOAD_DIR = Path(ml_path("download.xlsx")).parent
 URL          = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
 # ── Overrides manuales: cuando la API clasifica mal ──────────────────────────
@@ -47,7 +51,7 @@ SEARCH_OVERRIDES = {
 # ── Leer queries ──────────────────────────────────────────────────────────────
 if "--file" in sys.argv:
     idx = sys.argv.index("--file")
-    with open(sys.argv[idx + 1]) as f:
+    with open(sys.argv[idx + 1], encoding="utf-8") as f:
         queries = [l.strip() for l in f if l.strip()]
 elif len(sys.argv) > 1:
     queries = sys.argv[1:]
@@ -171,7 +175,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
     termino = SEARCH_OVERRIDES.get(category_name, category_name)
     print(f"\n  Buscando: '{termino[:50]}' → esperando '{category_name}' / '{domain_name[:35]}'")
 
-    page.screenshot(path=f"/tmp/ml_antes_busqueda.png")
+    page.screenshot(path=ml_path(f"ml_antes_busqueda.png"))
 
     # Buscar el campo de texto con múltiples estrategias.
     # OJO: el header de ML tiene su propio buscador global ("Buscar tus
@@ -230,8 +234,8 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
                 continue
 
     if not search:
-        page.screenshot(path=f"/tmp/ml_sin_campo_busqueda.png")
-        print("  ⚠️  Campo de búsqueda no encontrado — ver /tmp/ml_sin_campo_busqueda.png")
+        page.screenshot(path=ml_path(f"ml_sin_campo_busqueda.png"))
+        print("  ⚠️  Campo de búsqueda no encontrado — ver .kobber/mercadolibre/ml_sin_campo_busqueda.png")
         return False
 
     targets = [category_name.lower(), domain_name.lower()]
@@ -277,7 +281,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         search.press("Enter")
 
     time.sleep(2.5)
-    page.screenshot(path=f"/tmp/ml_{category_name[:15].replace(' ','_')}_resultados.png")
+    page.screenshot(path=ml_path(f"ml_{category_name[:15].replace(' ','_')}_resultados.png"))
 
     # Si ML no encontró resultados, solo ofrece el chat del "Asistente" —
     # no hay nada que agregar, así que salimos antes de caer en ese modal.
@@ -337,7 +341,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         except:
             continue
 
-    print(f"  ❌ Sin botón Agregar para '{termino}' — revisa /tmp/ml_*.png")
+    print(f"  ❌ Sin botón Agregar para '{termino}' — revisa .kobber/mercadolibre/ml_*.png")
     return False
 
 print("\n=== PASO 2: Agregando categorías en ML ===")
@@ -352,21 +356,21 @@ with sync_playwright() as p:
     time.sleep(2)
 
     # Captura inicial para diagnóstico
-    page.screenshot(path="/tmp/ml_inicio.png")
+    page.screenshot(path=ml_path("ml_inicio.png"))
     current_url = page.url
     print(f"URL actual: {current_url}")
 
     # Detectar si fue redirigido al login
     if "login" in current_url or "registration" in current_url or "mercadolibre" not in current_url:
         print("❌ Sesión expirada — redirigido al login. Corre ml_login.py primero.")
-        page.screenshot(path="/tmp/ml_login_redirect.png")
+        page.screenshot(path=ml_path("ml_login_redirect.png"))
         browser.close(); sys.exit(1)
 
     cerrar_tutorial(page)
 
     if not ir_a_tab_categorias(page):
-        page.screenshot(path="/tmp/ml_sin_tab_categorias.png")
-        print("⚠️  No se encontró el tab 'Buscar categorías' — ver /tmp/ml_sin_tab_categorias.png")
+        page.screenshot(path=ml_path("ml_sin_tab_categorias.png"))
+        print("⚠️  No se encontró el tab 'Buscar categorías' — ver .kobber/mercadolibre/ml_sin_tab_categorias.png")
         browser.close(); sys.exit(1)
 
     print("Tab activo: Buscar categorías\n")
@@ -398,18 +402,18 @@ with sync_playwright() as p:
         browser.close(); sys.exit(1)
 
     print("Descargando...")
-    page.screenshot(path="/tmp/ml_antes_descarga.png")
+    page.screenshot(path=ml_path("ml_antes_descarga.png"))
     try:
         with page.expect_download(timeout=60000) as dl:
             download_btn.click(timeout=10000)
         download = dl.value
-        dest = DOWNLOAD_DIR / download.suggested_filename
+        dest = Path(ml_path(download.suggested_filename))
         download.save_as(dest)
         print(f"\n✅ Plantilla descargada: {dest}")
     except Exception as e:
-        page.screenshot(path="/tmp/ml_error_descarga.png")
+        page.screenshot(path=ml_path("ml_error_descarga.png"))
         print(f"\n❌ Error al descargar: {e}")
-        print("   Captura guardada en /tmp/ml_error_descarga.png")
+        print("   Captura guardada en .kobber/mercadolibre/ml_error_descarga.png")
         browser.close(); sys.exit(1)
     browser.close()
 
@@ -419,7 +423,7 @@ for item in plan:
 
 # Guardar el plan como JSON para que fill-blank-template lo use
 import json as _json
-plan_path = "/tmp/ml_category_plan.json"
-with open(plan_path, "w") as f:
+plan_path = ml_path("ml_category_plan.json")
+with open(plan_path, "w", encoding="utf-8") as f:
     _json.dump(plan, f, ensure_ascii=False, indent=2)
 print(f"\n💾 Plan guardado en: {plan_path}")

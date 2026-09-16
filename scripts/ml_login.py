@@ -2,9 +2,13 @@
 Abre un browser, espera que hagas login en ML y guarda la sesión.
 Corre con:  python3 scripts/ml_login.py
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from local_paths import ml_path
 from playwright.sync_api import sync_playwright
 
-SESSION_FILE = "/tmp/ml_session.json"
+SESSION_FILE = ml_path("ml_session.json")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, slow_mo=100, channel="chrome")
@@ -22,7 +26,7 @@ with sync_playwright() as p:
     input("Presiona Enter cuando estés listo...")
 
     ctx.storage_state(path=SESSION_FILE)
-    page.screenshot(path="/tmp/ml_categories_login.png")
+    page.screenshot(path=ml_path("ml_categories_login.png"))
 
     print(f"\nSesión guardada en: {SESSION_FILE}")
     print(f"URL actual: {page.url}")

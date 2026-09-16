@@ -1,8 +1,12 @@
 """Inspecciona la página de ML para encontrar los selectores correctos."""
 import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from local_paths import ml_path
 from playwright.sync_api import sync_playwright
 
-SESSION_FILE = "/tmp/ml_session.json"
+SESSION_FILE = ml_path("ml_session.json")
 URL = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
 with sync_playwright() as p:
@@ -36,7 +40,7 @@ with sync_playwright() as p:
         except:
             pass
 
-    page.screenshot(path="/tmp/ml_inspect.png")
-    print("\nScreenshot: /tmp/ml_inspect.png")
+    page.screenshot(path=ml_path("ml_inspect.png"))
+    print("\nScreenshot: .kobber/mercadolibre/ml_inspect.png")
     input("\nPresiona Enter para cerrar...")
     browser.close()

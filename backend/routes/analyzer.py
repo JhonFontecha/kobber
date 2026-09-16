@@ -1,3 +1,5 @@
+import sys
+from local_paths import ml_path
 import glob
 import io
 import json
@@ -1074,20 +1076,20 @@ async def download_template(body: dict):
     if not con_categoria:
         raise HTTPException(400, "Los productos seleccionados no tienen categoria_ml asignada")
 
-    nombres_file = "/tmp/ml_productos_seleccionados.txt"
-    with open(nombres_file, "w") as f:
+    nombres_file = ml_path("ml_productos_seleccionados.txt")
+    with open(nombres_file, "w", encoding="utf-8") as f:
         f.write("\n".join(f'{p["categoria_ml"]}\t{p["nombre"]}' for p in con_categoria))
 
     # Ejecutar el scraper como subprocess
     script = os.path.join(os.path.dirname(__file__), "../../scripts/ml_scrape_template.py")
     script = os.path.abspath(script)
-    venv_python = os.path.join(os.path.dirname(__file__), "../../backend/venv/bin/python3")
-    venv_python = os.path.abspath(venv_python)
+    venv_python = sys.executable
 
     try:
         result = subprocess.run(
             [venv_python, script, "--file", nombres_file],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, encoding="utf-8", timeout=300,
+            env={**os.environ, "PYTHONUTF8": "1"},
             cwd=os.path.dirname(script),
         )
     except subprocess.TimeoutExpired:
@@ -1100,7 +1102,7 @@ async def download_template(body: dict):
 
     # Buscar el archivo más reciente descargado
     downloads = sorted(
-        glob.glob(os.path.expanduser("~/Downloads/Publicar-*.xlsx")),
+        glob.glob(os.path.join(os.path.dirname(ml_path("download.xlsx")), "Publicar-*.xlsx")),
         key=os.path.getmtime, reverse=True,
     )
     if not downloads:
@@ -1114,9 +1116,9 @@ async def download_template(body: dict):
     # coincida con lo que fill-blank-template va a buscar en el paso 4.
     try:
         hojas_reales = set(openpyxl.load_workbook(downloads[0], read_only=True).sheetnames)
-        plan_path = "/tmp/ml_category_plan.json"
+        plan_path = ml_path("ml_category_plan.json")
         if os.path.exists(plan_path):
-            with open(plan_path) as f:
+            with open(plan_path, encoding="utf-8") as f:
                 plan = json.load(f)
             por_nombre = {p["nombre"]: p for p in productos}
             for item in plan:
@@ -1144,7 +1146,7 @@ async def ml_session_status():
     import asyncio
     from playwright.async_api import async_playwright
 
-    SESSION_FILE = "/tmp/ml_session.json"
+    SESSION_FILE = ml_path("ml_session.json")
 
     if not os.path.exists(SESSION_FILE):
         return {"active": False, "reason": "no_session"}
@@ -1180,7 +1182,7 @@ async def ml_login():
     import asyncio
     from playwright.async_api import async_playwright
 
-    SESSION_FILE = "/tmp/ml_session.json"
+    SESSION_FILE = ml_path("ml_session.json")
     ML_URL       = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
     async def do_login():

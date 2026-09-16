@@ -27,3 +27,7 @@ venv/
 # Claude Code — settings.json y hooks/ se versionan (se comparten entre Macs),
 # settings.local.json queda local a cada máquina
 .claude/settings.local.json
+
+# Estado, registros y sesiones locales del controlador
+.kobber/
+tests/__pycache__/

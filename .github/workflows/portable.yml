@@ -1,0 +1,35 @@
+name: Windows y macOS
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  local-app:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: python scripts/kobber.py instalar
+      - run: python -m unittest discover -s tests -v
+      - run: python scripts/kobber.py iniciar
+      - run: python scripts/kobber.py estado
+      - name: Comprobar interfaz y backend
+        run: python -c "import urllib.request as u; assert u.urlopen('http://127.0.0.1:8000/health').status == 200; assert u.urlopen('http://127.0.0.1:5173/admin').status == 200"
+      - name: Detener
+        if: always()
+        run: python scripts/kobber.py detener
+      - name: Comprobar parada
+        run: python -c "import runpy; k=runpy.run_path('scripts/kobber.py'); assert not k['occupied'](8000); assert not k['occupied'](5173)"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: logs-${{ matrix.os }}
+          path: .kobber/*.log
+          include-hidden-files: true
