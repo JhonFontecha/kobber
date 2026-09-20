@@ -188,11 +188,14 @@ Diseño: Tailwind con paleta custom "graphite" (ver `tailwind.config.js`), estil
 
 ### Scripts de automatización ML (`scripts/`)
 
-Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backend, invocados manualmente):
+Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backend, invocados manualmente o desde `POST /api/analyzer/download-template`):
 
-1. `ml_login.py` — abre browser para login manual, guarda sesión en `/tmp/ml_session.json`
-2. `ml_scrape_template.py` — usa la sesión guardada para buscar categorías y descargar la plantilla; `--file /tmp/productos.txt` o lista de productos como args. Tiene `CATEGORY_OVERRIDES` y `SIN_CATEGORIA_ML` hardcodeados para casos donde la clasificación automática de ML falla.
-3. `ml_inspect.py` — utilidad de debug para inspeccionar selectores de la página de ML
+1. `ml_chrome.py` — lanza (o reutiliza) un Chrome real, con perfil propio de Kobber en `/tmp/ml_chrome_profile`, como proceso del sistema operativo (`subprocess.Popen`, no `playwright.launch`) escuchando CDP en el puerto 9223. Se lanza aparte porque Playwright mata cualquier browser que él mismo lanza en cuanto su conexión se cierra — así la misma ventana sobrevive entre corridas de los scripts de abajo. Chrome real (no el Chromium de pruebas) porque ML bloquea ese último como navegador automatizado ("Alcanzaste el límite de intentos"). No se puede usar el Chrome normal del usuario: bloquea `--remote-debugging-port` en su perfil por defecto (protección anti-secuestro de sesión vía CDP).
+2. `ml_login.py` — se conecta por CDP a ese Chrome (vía `ensure_kobber_chrome()`) y abre una pestaña para loguearse en ML a mano; la sesión queda en el perfil persistente, no en un archivo.
+3. `ml_scrape_template.py` — se conecta al mismo Chrome, identifica categorías vía `domain_discovery` y las agrega en la página de publicación masiva. El matching de categoría exige coincidencia EXACTA de línea contra `domain_name`/`category_name` antes de caer a un respaldo por substring (que descarta rubros ajenos a ferretería vía `TOP_LEVEL_EXCLUIDOS` — ver "Problemas conocidos"). Tiene `CATEGORY_OVERRIDES` y `SIN_CATEGORIA_ML` hardcodeados para casos donde la clasificación automática de ML falla. **No descarga el archivo**: deja la pestaña abierta para que el usuario revise/corrija la categoría a mano y descargue él mismo — la elección de ML no siempre es la correcta.
+4. `ml_inspect.py` — utilidad de debug para inspeccionar selectores de la página de ML
+
+`categoria_ml` en la BD se resincroniza en `POST /api/analyzer/fill-blank-template` (no en `download-template`), usando las hojas reales del archivo que el usuario efectivamente sube — si no matchea ninguna, el Paso 4 del publicador deja reasignarla a mano a una hoja real y reintentar.
 
 Correr desde la raíz del repo: `backend/venv/bin/python3 scripts/<script>.py`.
 
@@ -237,9 +240,16 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
 - Login de tienda (`LoginPage.jsx`) no es autenticación real — credenciales hardcodeadas en el frontend, visibles en el bundle. No usar para proteger nada sensible sin reemplazarlo primero.
 - `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
 - `playwright` está en `requirements.txt`. En macOS 13 (Ventura) `playwright install chromium` **falla** —
-  Playwright dejó de dar soporte a Chromium en ese OS — por eso todos los `chromium.launch(...)` del
-  proyecto (`analyzer.py` x2, `scripts/ml_login.py`, `ml_scrape_template.py`, `ml_inspect.py`) pasan
-  `channel="chrome"` para usar el Google Chrome del sistema en vez del binario propio de Playwright.
-  Requiere tener Chrome instalado — si no está, instalarlo desde google.com/chrome, no correr
-  `playwright install`.
+  Playwright dejó de dar soporte a Chromium en ese OS — así que en todo el proyecto se usa el Google
+  Chrome real del sistema en vez del binario propio de Playwright: `ml_inspect.py` con
+  `chromium.launch(..., channel="chrome")`, y `ml_login.py`/`ml_scrape_template.py` conectándose por
+  CDP al Chrome que lanza `ml_chrome.py` (que sí invoca el binario de Chrome directo, no vía
+  Playwright — ver arriba). Requiere tener Chrome instalado en `/Applications/Google Chrome.app`
+  — si no está, instalarlo desde google.com/chrome, no correr `playwright install`.
+- Matching de categoría en `ml_scrape_template.py`: el buscador de categorías de ML puede devolver
+  una categoría de otro rubro que contiene el término buscado como substring (ej. "aceiteras" →
+  "Vinagreras y aceiteras", de cocina, en vez de "Aceiteras Manuales", de ferretería). Se mitiga
+  exigiendo coincidencia exacta de línea contra `domain_name`/`category_name` antes del respaldo por
+  substring, y filtrando ese respaldo con `TOP_LEVEL_EXCLUIDOS` — si aparece un caso nuevo que ni
+  eso resuelve, sumarlo a `CATEGORY_OVERRIDES`.
 - El servidor de búsqueda pública de ML (`api.mercadolibre.com/sites/MCO/search` y `/products/search`) ahora devuelve 403 (`PolicyAgent`, firewall anti-bot) para requests sin sesión — incluso navegando con un browser real headless. Sólo `domain_discovery` (usado por `get_ml_category`) sigue público. Cualquier feature que necesite traer resultados de búsqueda reales de ML requiere sesión logueada vía Playwright (`ml_login.py`) o una app OAuth propia registrada en developers.mercadolibre.com — no hay atajo sin eso.
