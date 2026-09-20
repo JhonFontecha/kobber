@@ -77,7 +77,7 @@ def generate_ml_excel(body: MLExportRequest):
     headers = [
         ("Título (max 60 c.)",    45),
         ("SKU / Clave",           16),
-        ("Código Trupper",        15),
+        ("Código Truper",         15),
         ("EAN / NC",              14),
         ("Condición",             10),
         ("Marca",                 12),
@@ -143,7 +143,7 @@ def generate_ml_excel(body: MLExportRequest):
                 p.get("descripcion") or "",
                 p.get("categoria") or "",
                 "Mercado Envíos",
-                "Cuotas",
+                "Cuotas extra",
                 "Seleccionar",
                 "Seleccionar",
                 fotos_str,

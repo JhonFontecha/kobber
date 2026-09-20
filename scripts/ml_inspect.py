@@ -6,7 +6,7 @@ SESSION_FILE = "/tmp/ml_session.json"
 URL = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False, slow_mo=100)
+    browser = p.chromium.launch(headless=False, slow_mo=100, channel="chrome")
     ctx  = browser.new_context(storage_state=SESSION_FILE)
     page = ctx.new_page()
 

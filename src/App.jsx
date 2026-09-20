@@ -331,6 +331,7 @@ function ImportTab({ onImported, onToast }) {
   const [result, setResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [editIdx, setEditIdx] = useState(null)
+  const [imgSel, setImgSel] = useState({})   // { [idx]: Set<url> } — imagenes elegidas por producto
   const inputRef = useRef()
 
   const handleFile = (e) => {
@@ -379,6 +380,11 @@ function ImportTab({ onImported, onToast }) {
             setProgress(prev => prev ? ({ ...prev, current: event.page, lastElapsed: event.elapsed_s, errors: (prev.errors ?? 0) + 1 }) : prev)
           } else if (event.type === 'done') {
             setResult(event)
+            const sel = {}
+            event.productos?.forEach((p, idx) => {
+              sel[idx] = new Set(p.imagenes_candidatas || [])
+            })
+            setImgSel(sel)
             if (event.errores?.length) {
               onToast({ type: 'error', text: `${event.errores.length} página(s) con errores de extracción.` })
             }
@@ -397,11 +403,16 @@ function ImportTab({ onImported, onToast }) {
     if (!result?.productos?.length) return
     setSaving(true)
     try {
-      const data = await api.post('/api/catalog/save', { productos: result.productos })
+      const productos = result.productos.map((p, idx) => ({
+        ...p,
+        imagenes_seleccionadas: [...(imgSel[idx] || [])],
+      }))
+      const data = await api.post('/api/catalog/save', { productos })
       onToast({ type: 'ok', text: `${data.productos} productos y ${data.variantes} variantes guardados.` })
       onImported()
       setResult(null)
       setFile(null)
+      setImgSel({})
     } catch (e) {
       onToast({ type: 'error', text: e.message })
     } finally {
@@ -417,12 +428,27 @@ function ImportTab({ onImported, onToast }) {
     })
   }
 
+  const toggleImagen = (idx, url) => {
+    setImgSel(prev => {
+      const s = new Set(prev[idx] || [])
+      s.has(url) ? s.delete(url) : s.add(url)
+      return { ...prev, [idx]: s }
+    })
+  }
+
   const removeProduct = (idx) => {
     setResult(prev => ({
       ...prev,
       productos: prev.productos.filter((_, i) => i !== idx),
       total_productos: prev.total_productos - 1,
     }))
+    setImgSel(prev => {
+      const next = {}
+      Object.keys(prev).map(Number).filter(i => i !== idx).forEach(i => {
+        next[i > idx ? i - 1 : i] = prev[i]
+      })
+      return next
+    })
   }
 
   return (
@@ -479,6 +505,9 @@ function ImportTab({ onImported, onToast }) {
                 onChange={(field, val) => updateProduct(idx, field, val)}
                 onRemove={() => removeProduct(idx)}
                 showSave={false}
+                imagenesCandidatas={p.imagenes_candidatas}
+                imagenesSeleccionadas={imgSel[idx]}
+                onToggleImagen={url => toggleImagen(idx, url)}
               />
             ))}
           </div>
@@ -498,7 +527,10 @@ const ESTADO_COLOR = {
   descartado: '#C0392B',
 }
 
-function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave, onFetchImages, showSave = true }) {
+function ProductCard({
+  product: p, isEditing, onEdit, onChange, onRemove, onSave, onFetchImages, showSave = true,
+  imagenesCandidatas, imagenesSeleccionadas, onToggleImagen,
+}) {
   // Normalize field names: handles both Claude extraction format and Supabase format
   const variantes  = p.variantes       || p.product_variants || []
   const imagenes   = p.imagenes        || p.product_images   || []
@@ -536,6 +568,7 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
       const body = {
         descripcion:    applyDesc ? enhanceResult.descripcion : null,
         atributos_nuevos: (enhanceResult.atributos_sugeridos || []).filter((_, i) => applyAttrs.includes(i)),
+        titulos_por_variante: enhanceResult.titulos_por_variante || [],
       }
       const r = await fetch(`/api/products/${p.id}/apply-enhance`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -612,6 +645,14 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
           )}
         </div>
       </div>
+
+      {imagenesCandidatas && (
+        <ImagenesCandidatasGallery
+          imagenes={imagenesCandidatas}
+          seleccionadas={imagenesSeleccionadas}
+          onToggle={onToggleImagen}
+        />
+      )}
 
       {isEditing && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -694,36 +735,10 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
 
           {p.titulos_por_variante?.length > 0 && (
             <EditRow label="Títulos sugeridos para MercadoLibre">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {p.titulos_por_variante.map((item, vi) => (
-                  <div key={vi}>
-                    <div style={{
-                      fontSize: '10px', fontFamily: 'monospace', fontWeight: '700',
-                      color: 'var(--accent)', marginBottom: 4, textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                    }}>
-                      {item.clave || `Variante ${vi + 1}`}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {item.titulos?.map((t, ti) => (
-                        <div key={ti} style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          background: 'var(--bg)', border: '0.5px solid var(--border)',
-                          borderRadius: 6, padding: '5px 10px', gap: 10,
-                        }}>
-                          <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t}</span>
-                          <span style={{
-                            fontSize: '10px', fontWeight: '600', flexShrink: 0,
-                            color: t.length > 55 ? '#f97316' : 'var(--text-tertiary)',
-                          }}>
-                            {t.length}/60
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <EditableTitulos
+                grupos={p.titulos_por_variante}
+                onChange={next => onChange('titulos_por_variante', next)}
+              />
             </EditRow>
           )}
         </div>
@@ -762,17 +777,15 @@ function ProductCard({ product: p, isEditing, onEdit, onChange, onRemove, onSave
           </div>
 
           {/* Títulos sugeridos */}
-          {enhanceResult.titulos_sugeridos?.length > 0 && (
+          {enhanceResult.titulos_por_variante?.length > 0 && (
             <div style={{ marginBottom: 12 }}>
               <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: 6 }}>
-                Títulos sugeridos (referencia):
+                Títulos sugeridos (editables):
               </p>
-              {enhanceResult.titulos_sugeridos.map((t, i) => (
-                <p key={i} style={{ fontSize: '12px', color: 'var(--text-primary)', margin: '0 0 3px',
-                  background: '#fff', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)' }}>
-                  {t}
-                </p>
-              ))}
+              <EditableTitulos
+                grupos={enhanceResult.titulos_por_variante}
+                onChange={next => setEnhanceResult(prev => ({ ...prev, titulos_por_variante: next }))}
+              />
             </div>
           )}
 
@@ -847,6 +860,125 @@ function EditTextarea({ value, onChange, rows = 2 }) {
   )
 }
 
+// Títulos sugeridos editables, agrupados por variante: [{clave, titulos: [...]}]
+function EditableTitulos({ grupos, onChange }) {
+  const setTitulo = (gi, ti, value) => {
+    onChange(grupos.map((g, i) => i === gi
+      ? { ...g, titulos: g.titulos.map((t, j) => j === ti ? value : t) }
+      : g))
+  }
+  const removeTitulo = (gi, ti) => {
+    onChange(grupos.map((g, i) => i === gi
+      ? { ...g, titulos: g.titulos.filter((_, j) => j !== ti) }
+      : g))
+  }
+  const addTitulo = (gi) => {
+    onChange(grupos.map((g, i) => i === gi ? { ...g, titulos: [...g.titulos, ''] } : g))
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {grupos.map((item, vi) => (
+        <div key={item.clave || vi}>
+          <div style={{
+            fontSize: '10px', fontFamily: 'monospace', fontWeight: '700',
+            color: 'var(--accent)', marginBottom: 4, textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+          }}>
+            {item.clave || `Variante ${vi + 1}`}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {(item.titulos || []).map((t, ti) => (
+              <div key={ti} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  value={t}
+                  onChange={e => setTitulo(vi, ti, e.target.value)}
+                  style={{
+                    flex: 1, fontSize: '12px', color: 'var(--text-primary)',
+                    background: 'var(--bg)', border: '0.5px solid var(--border)',
+                    borderRadius: 6, padding: '5px 10px', boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{
+                  fontSize: '10px', fontWeight: '600', flexShrink: 0, minWidth: 32, textAlign: 'right',
+                  color: t.length > 55 ? '#f97316' : 'var(--text-tertiary)',
+                }}>
+                  {t.length}/60
+                </span>
+                <button type="button" onClick={() => removeTitulo(vi, ti)} title="Quitar título" style={{
+                  flexShrink: 0, width: 20, height: 20, border: 'none', background: 'transparent',
+                  color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: '13px', lineHeight: 1,
+                }}>✕</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => addTitulo(vi)} style={{
+              alignSelf: 'flex-start', border: 'none', background: 'transparent',
+              color: 'var(--accent)', fontSize: '11px', fontWeight: '600', cursor: 'pointer', padding: '2px 0',
+            }}>+ Agregar título</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Galería de imágenes candidatas (revisión antes de guardar) ──────────────────
+
+function ImagenesCandidatasGallery({ imagenes, seleccionadas, onToggle }) {
+  if (!imagenes.length) {
+    return (
+      <p style={{ marginTop: 10, fontSize: '11px', color: 'var(--text-tertiary)' }}>
+        No se encontraron fotos automáticamente para este producto.
+      </p>
+    )
+  }
+
+  const n = seleccionadas?.size || 0
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+      <p style={{ margin: '0 0 6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+        Fotos encontradas — {n}/{imagenes.length} seleccionadas para guardar:
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {imagenes.map((url, i) => {
+          const isSel = seleccionadas?.has(url)
+          return (
+            <div
+              key={i}
+              onClick={() => onToggle(url)}
+              title={url.split('/').pop()}
+              style={{
+                position: 'relative', cursor: 'pointer',
+                border: `2px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-md)', overflow: 'hidden',
+                boxShadow: isSel ? '0 0 0 2px rgba(200,118,44,0.25)' : 'none',
+                transition: 'all 0.15s', opacity: isSel ? 1 : 0.5,
+              }}
+            >
+              <img
+                src={url}
+                alt={`foto ${i + 1}`}
+                style={{ width: 72, height: 72, objectFit: 'contain', background: '#fff', display: 'block' }}
+                onError={e => { e.target.style.display = 'none' }}
+              />
+              {isSel && (
+                <div style={{
+                  position: 'absolute', top: 3, right: 3,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: 'var(--accent)', color: '#fff',
+                  fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: '700',
+                }}>✓</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Products tab ───────────────────────────────────────────────────────────────
 
 const RES_COLS = '1fr 120px 95px 70px 105px 90px 80px'
@@ -861,7 +993,7 @@ function ProductsTab({ onToast }) {
 
   // Input state
   const [pastedText, setPastedText] = useState('')
-  const [defaultPct, setDefaultPct] = useState(30)
+  const [defaultPct, setDefaultPct] = useState(0)
   const [excelFile, setExcelFile] = useState(null)
   const excelRef = useRef()
 
@@ -954,6 +1086,7 @@ function ProductsTab({ onToast }) {
       const body = {
         descripcion:     enhApplyDesc ? enhanceResult.descripcion : null,
         atributos_nuevos: (enhanceResult.atributos_sugeridos || []).filter((_, i) => enhApplyAttrs.includes(i)),
+        titulos_por_variante: enhanceResult.titulos_por_variante || [],
       }
       const r = await fetch(`/api/products/${enhanceResult.productId}/apply-enhance`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1464,17 +1597,15 @@ function ProductsTab({ onToast }) {
                   </div>
 
                   {/* Títulos sugeridos */}
-                  {enhanceResult.titulos_sugeridos?.length > 0 && (
+                  {enhanceResult.titulos_por_variante?.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
                       <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', margin: '0 0 6px' }}>
-                        Títulos sugeridos:
+                        Títulos sugeridos (editables):
                       </p>
-                      {enhanceResult.titulos_sugeridos.map((t, i) => (
-                        <p key={i} style={{
-                          fontSize: '12px', margin: '0 0 4px', padding: '4px 8px',
-                          background: '#fff', borderRadius: 4, border: '1px solid var(--border)',
-                        }}>{t}</p>
-                      ))}
+                      <EditableTitulos
+                        grupos={enhanceResult.titulos_por_variante}
+                        onChange={next => setEnhanceResult(prev => ({ ...prev, titulos_por_variante: next }))}
+                      />
                     </div>
                   )}
 
@@ -1542,115 +1673,6 @@ function ProductsTab({ onToast }) {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ── Export tab ─────────────────────────────────────────────────────────────────
-
-function ExportTab({ onToast }) {
-  const [margen, setMargen] = useState(30)
-  const [categoria, setCategoria] = useState('')
-  const [exporting, setExporting] = useState(false)
-  const [stats, setStats] = useState(null)
-
-  useEffect(() => {
-    api.get('/api/products/stats').then(setStats).catch(() => {})
-  }, [])
-
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const res = await fetch('/api/excel/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          margen_global: margen,
-          categoria_ml: categoria || null,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Error exportando')
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `kobber_productos_${new Date().toISOString().slice(0,10)}.xlsx`
-      a.click()
-      URL.revokeObjectURL(url)
-      onToast({ type: 'ok', text: 'Excel descargado.' })
-    } catch (e) {
-      onToast({ type: 'error', text: e.message })
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  return (
-    <div>
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: 16,
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-      }}>
-        <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: 14 }}>Configuración de exportación</p>
-
-        {stats && (
-          <div style={{
-            background: 'var(--bg)', borderRadius: 'var(--radius-md)', padding: '10px 14px',
-            marginBottom: 16, fontSize: '12px', color: 'var(--text-secondary)',
-          }}>
-            {stats.total} productos en total — se exportarán todos los que no estén "descartados"
-          </div>
-        )}
-
-        <EditRow label="Margen global de precio (%)" style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input
-              type="range" min={0} max={100} value={margen}
-              onChange={e => setMargen(Number(e.target.value))}
-              style={{ flex: 1 }}
-            />
-            <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--accent)', minWidth: 40 }}>
-              {margen}%
-            </span>
-          </div>
-          <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>
-            Precio venta = precio distribuidor × (1 + {margen}/100)
-          </p>
-        </EditRow>
-
-        <EditRow label="Categoría ML (opcional — sobreescribe por producto)" style={{ marginBottom: 16 }}>
-          <EditInput value={categoria} onChange={setCategoria} />
-        </EditRow>
-
-        <Btn onClick={handleExport} disabled={exporting}>
-          {exporting ? 'Generando Excel...' : 'Descargar Excel para MercadoLibre'}
-        </Btn>
-      </div>
-
-      <div style={{
-        background: 'var(--surface)', border: '0.5px solid var(--border)',
-        borderRadius: 'var(--radius-lg)', padding: '16px 20px',
-        fontSize: '12px', color: 'var(--text-tertiary)',
-      }}>
-        <p style={{ fontWeight: '500', marginBottom: 6, color: 'var(--text-secondary)' }}>El Excel incluye:</p>
-        <ul style={{ paddingLeft: 18, margin: 0, lineHeight: 1.8 }}>
-          <li>SKU / Código de vendedor</li>
-          <li>Título del anuncio</li>
-          <li>Descripción del producto</li>
-          <li>Categoría MercadoLibre</li>
-          <li>Precio de venta calculado con el margen</li>
-          <li>Stock (unidades por caja)</li>
-          <li>URLs de fotos</li>
-          <li>Variantes disponibles</li>
-        </ul>
-        <p style={{ marginTop: 10 }}>
-          Cuando tengas los templates oficiales de ML, podemos ajustar las columnas exactas.
-        </p>
       </div>
     </div>
   )
@@ -1919,7 +1941,7 @@ function FlowTab({ onToast }) {
   const [productStocks, setProductStocks] = useState({})  // {product_id: stock}
   const [summary,     setSummary]     = useState(null)
   const [pastedText,  setPastedText]  = useState('')
-  const [defaultPct,  setDefaultPct]  = useState(30)
+  const [defaultPct,  setDefaultPct]  = useState(0)
   const [searchFile,  setSearchFile]  = useState(null)
   const [searchLoad,  setSearchLoad]  = useState(false)
   const [pageNum,     setPageNum]     = useState('')
