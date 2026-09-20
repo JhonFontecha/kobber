@@ -1,19 +1,27 @@
 """
 1. Consulta domain_discovery de ML para identificar la mejor categoría por producto.
 2. Busca esa categoría en la página de publicación masiva usando el domain_name.
-3. La agrega al listado y descarga la plantilla con todas.
+3. La agrega al listado. La descarga queda para revisión manual — la
+   elección de categoría de ML no siempre es la más indicada (ver
+   TOP_LEVEL_EXCLUIDOS), así que este script deja la pestaña abierta con
+   las categorías ya agregadas para que el usuario las revise/corrija y le
+   dé click a "Descargar" él mismo.
+
+Usa un perfil de Chrome real y persistente, propio de Kobber — corre primero
+ml_login.py para loguearte ahí una vez. Esa ventana queda corriendo como
+proceso del sistema (no la lanza Playwright, para que sobreviva entre
+corridas) y este script solo se conecta a ella por CDP y abre una pestaña
+nueva ahí, sin tocar las demás pestañas.
 
 Corre con:
   python3 scripts/ml_scrape_template.py --file /tmp/productos.txt
   python3 scripts/ml_scrape_template.py "Producto 1" "Producto 2" ...
 """
 import sys, ssl, time, json, urllib.request, urllib.parse
-from pathlib import Path
 from playwright.sync_api import sync_playwright
+from ml_chrome import ensure_kobber_chrome, KOBBER_CDP_URL, PROFILE_DIR
 
-SESSION_FILE = "/tmp/ml_session.json"
-DOWNLOAD_DIR = Path("/Users/jhon/Downloads")
-URL          = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
+URL = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
 # ── Overrides manuales: cuando la API clasifica mal ──────────────────────────
 CATEGORY_OVERRIDES = {
@@ -27,6 +35,22 @@ CATEGORY_OVERRIDES = {
 SIN_CATEGORIA_ML = {
     "pisones truper",
     "soldadura para tubería de gas",
+}
+
+# Rubros ajenos a ferretería/herramientas (Truper, Pretul y FIERO son solo
+# de ferretería) — el respaldo por substring de intentar_agregar() descarta
+# cualquier resultado cuyo rubro esté acá, aunque matchee por texto.
+TOP_LEVEL_EXCLUIDOS = {
+    "hogar", "cocina", "electrodomésticos", "electrodomesticos",
+    "bebés", "bebes", "belleza y cuidado personal",
+    "alimentos y bebidas", "salud y equipamiento médico", "salud y equipamiento medico",
+    "ropa y accesorios", "calzado", "joyas y relojes",
+    "juegos y juguetes", "mascotas", "arte, papelería y mercería", "arte, papeleria y merceria",
+    "música, películas y series", "musica, peliculas y series",
+    "electrónica, audio y video", "electronica, audio y video",
+    "celulares y teléfonos", "celulares y telefonos",
+    "computación", "computacion", "cámaras y accesorios", "camaras y accesorios",
+    "consolas y videojuegos", "deportes y fitness",
 }
 
 # ── Términos de búsqueda cortos para la página de ML ────────────────────────
@@ -54,8 +78,14 @@ elif len(sys.argv) > 1:
 else:
     queries = ["Mandril 1/2 sin llave TRUPER"]
 
-if not Path(SESSION_FILE).exists():
+if not PROFILE_DIR.exists():
     print("Primero corre ml_login.py para guardar la sesión.")
+    sys.exit(1)
+
+try:
+    ensure_kobber_chrome()
+except RuntimeError as e:
+    print(f"❌ {e}")
     sys.exit(1)
 
 # ── Paso 1: Identificar categorías vía API ───────────────────────────────────
@@ -162,10 +192,12 @@ def ir_a_tab_categorias(page):
             tab.click(); time.sleep(1); return True
     return False
 
-def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) -> bool:
+def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) -> str | None:
     """
     Busca por nombre de producto en ML y selecciona el resultado que coincida
     con category_name O domain_name (lo que ML muestre en pantalla).
+    Devuelve la etiqueta EXACTA que ML agregó (= nombre real de la hoja en el
+    Excel descargado), o None si no se agregó nada.
     """
     # Término de búsqueda: usar override si existe, si no el producto original
     termino = SEARCH_OVERRIDES.get(category_name, category_name)
@@ -234,7 +266,10 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         print("  ⚠️  Campo de búsqueda no encontrado — ver /tmp/ml_sin_campo_busqueda.png")
         return False
 
-    targets = [category_name.lower(), domain_name.lower()]
+    # domain_name primero: es el dato más específico que ya decidió la API de
+    # domain_discovery de ML — category_name es más genérico y con más chance
+    # de chocar por substring con categorías no relacionadas (ver más abajo).
+    targets = [domain_name.lower(), category_name.lower()]
 
     # 1. Limpiar y escribir — varios métodos para mayor compatibilidad
     try:
@@ -286,39 +321,70 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         return False
 
     # 3. Primero buscar botones "Agregar" directamente visibles (resultados planos)
+    #
+    # "target in item_text" (substring) no alcanza: una categoría compuesta
+    # como "Vinagreras y aceiteras" contiene "aceiteras". Por eso primero
+    # exigimos que alguna LÍNEA del bloque (el nombre tal cual lo muestra ML,
+    # no el breadcrumb completo) sea EXACTAMENTE igual al target, y solo si
+    # no hay coincidencia exacta caemos al substring como respaldo.
+    def _item_lines(btn):
+        try:
+            text = btn.evaluate(
+                "b => b.closest('li')?.innerText || b.parentElement?.innerText || ''"
+            )
+        except Exception:
+            return None, []
+        lines = [l.strip().lower() for l in text.split("\n") if l.strip()]
+        return text, lines
+
+    def _breadcrumb_top(text):
+        """Rubro de nivel superior del breadcrumb (ej. 'Agro > ... > Aceiteras' → 'agro')."""
+        primera = text.strip().splitlines()[0] if text.strip() else ""
+        return primera.split(">")[0].strip().lower() if ">" in primera else ""
+
     def intentar_agregar():
         btns = [b for b in page.query_selector_all("button:has-text('Agregar')") if b.is_visible()]
         if not btns:
-            return False
-        # Buscar coincidencia con categoría esperada
-        # Primero intentar coincidir con domain_name (más específico)
-        # luego con category_name (más general)
+            return False, None
+
+        # Ronda 1: coincidencia EXACTA de alguna línea con domain_name/category_name
         for target in targets:
             for btn in btns:
-                try:
-                    item_text = btn.evaluate(
-                        "b => b.closest('li')?.innerText || b.parentElement?.innerText || ''"
-                    ).strip().lower()
-                    if target[:20] in item_text:
-                        print(f"  ✅ Coincidencia: {item_text[:70]}")
-                        btn.click(); time.sleep(1); return True
-                except:
+                text, lines = _item_lines(btn)
+                if text is None:
                     continue
-        # Sin coincidencia exacta — mostrar opciones disponibles y NO hacer clic
-        print(f"  ⚠️  Sin coincidencia exacta para '{category_name}'. Opciones disponibles:")
+                if target in lines:
+                    print(f"  ✅ Coincidencia exacta: {text[:70]!r}")
+                    btn.click(); time.sleep(1)
+                    return True, text.strip().splitlines()[-1].strip()
+
+        # Ronda 2: substring, como respaldo si ML no devolvió una línea exacta.
+        # Descartamos rubros ajenos a ferretería (cocina, hogar, etc.) aunque
+        # matcheen por texto — ver TOP_LEVEL_EXCLUIDOS.
+        for target in targets:
+            for btn in btns:
+                text, lines = _item_lines(btn)
+                if text is None:
+                    continue
+                if _breadcrumb_top(text) in TOP_LEVEL_EXCLUIDOS:
+                    continue
+                if target[:20] in text.lower():
+                    print(f"  ⚠️  Coincidencia aproximada (sin match exacto): {text[:70]!r}")
+                    btn.click(); time.sleep(1)
+                    return True, text.strip().splitlines()[-1].strip()
+
+        # Sin coincidencia — mostrar opciones disponibles y NO hacer clic
+        print(f"  ❌ Sin coincidencia para '{category_name}' / '{domain_name}'. Opciones disponibles:")
         for btn in btns[:5]:
-            try:
-                text = btn.evaluate(
-                    "b => b.closest('li')?.innerText || b.parentElement?.innerText || ''"
-                ).strip()
+            text, _ = _item_lines(btn)
+            if text:
                 print(f"       · {text[:70]}")
-            except:
-                pass
-        return False
+        return False, None
 
     # Intento 1: botones directos
-    if intentar_agregar():
-        return True
+    ok, etiqueta = intentar_agregar()
+    if ok:
+        return etiqueta
 
     # Intento 2: expandir acordeón y buscar Agregar dentro
     resultado_items = page.query_selector_all("ul > li, [class*='result'] li, [class*='category'] li")
@@ -332,20 +398,21 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
             if any(t[:15] in texto for t in targets):
                 print(f"  📂 Expandiendo: {texto[:60]}")
                 item.click(); time.sleep(1.5)
-                if intentar_agregar():
-                    return True
+                ok, etiqueta = intentar_agregar()
+                if ok:
+                    return etiqueta
         except:
             continue
 
     print(f"  ❌ Sin botón Agregar para '{termino}' — revisa /tmp/ml_*.png")
-    return False
+    return None
 
 print("\n=== PASO 2: Agregando categorías en ML ===")
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False, slow_mo=80)
-    ctx     = browser.new_context(storage_state=SESSION_FILE, accept_downloads=True)
-    page    = ctx.new_page()
+    browser = p.chromium.connect_over_cdp(KOBBER_CDP_URL)
+    ctx  = browser.contexts[0] if browser.contexts else browser.new_context()
+    page = ctx.new_page()  # pestaña nueva — no tocar otras pestañas que ya estén abiertas ahí
 
     page.goto(URL)
     page.wait_for_load_state("domcontentloaded", timeout=30000)
@@ -356,66 +423,71 @@ with sync_playwright() as p:
     current_url = page.url
     print(f"URL actual: {current_url}")
 
-    # Detectar si fue redirigido al login
+    # ML a veces exige un reto de verificación a la ventana automatizada aunque
+    # la sesión del perfil sea válida (lo confirma /ml-session-status en modo
+    # headless con el mismo perfil). Como la ventana ya está visible, en vez
+    # de cerrarla esperamos a que el usuario la resuelva a mano.
     if "login" in current_url or "registration" in current_url or "mercadolibre" not in current_url:
-        print("❌ Sesión expirada — redirigido al login. Corre ml_login.py primero.")
         page.screenshot(path="/tmp/ml_login_redirect.png")
-        browser.close(); sys.exit(1)
+        print("\n=================================================")
+        print("  ML pidió verificación de seguridad en esta ventana.")
+        print("  Resuélvela a mano (contraseña / código / captcha) y")
+        print("  espera a llegar de nuevo a la página de categorías.")
+        print("  Tienes 3 minutos.")
+        print("=================================================\n")
+        try:
+            page.wait_for_url("**/publicar-masivamente/categories**", timeout=180_000)
+            current_url = page.url
+            print(f"✅ Verificación resuelta. URL actual: {current_url}")
+        except Exception:
+            print("❌ No se resolvió la verificación a tiempo. Reintenta.")
+            page.close(); sys.exit(1)
 
     cerrar_tutorial(page)
 
     if not ir_a_tab_categorias(page):
         page.screenshot(path="/tmp/ml_sin_tab_categorias.png")
         print("⚠️  No se encontró el tab 'Buscar categorías' — ver /tmp/ml_sin_tab_categorias.png")
-        browser.close(); sys.exit(1)
+        page.close(); sys.exit(1)
 
     print("Tab activo: Buscar categorías\n")
 
     agregadas = 0
     for cat_name, info in sorted(categorias_a_agregar.items()):
-        if buscar_y_agregar(page, info["producto_repr"], cat_name, info["domain_name"]):
+        etiqueta_real = buscar_y_agregar(page, info["producto_repr"], cat_name, info["domain_name"])
+        if etiqueta_real:
             agregadas += 1
+            info["etiqueta_real"] = etiqueta_real
+            if etiqueta_real.lower() != cat_name.lower():
+                print(f"  ℹ️  Se agregó como '{etiqueta_real}' (esperado: '{cat_name}')")
 
     print(f"\nCategorías agregadas: {agregadas}/{len(categorias_a_agregar)}")
 
     if agregadas == 0:
         print("No se agregó ninguna. Abortando.")
-        browser.close(); sys.exit(1)
+        page.close(); sys.exit(1)
 
-    # Descargar
-    print("\nBuscando botón de descarga...")
-    time.sleep(1)
-    download_btn = None
-    for sel in ["button:has-text('Descargar planilla')", "button:has-text('Descargar plantilla')",
-                "button:has-text('Descargar')", "a:has-text('Descargar')"]:
-        download_btn = page.query_selector(sel)
-        if download_btn and download_btn.is_visible():
-            print(f"  Botón: {download_btn.inner_text().strip()!r}")
-            break
-
-    if not download_btn:
-        print("No se encontró el botón de descarga.")
-        browser.close(); sys.exit(1)
-
-    print("Descargando...")
     page.screenshot(path="/tmp/ml_antes_descarga.png")
-    try:
-        with page.expect_download(timeout=60000) as dl:
-            download_btn.click(timeout=10000)
-        download = dl.value
-        dest = DOWNLOAD_DIR / download.suggested_filename
-        download.save_as(dest)
-        print(f"\n✅ Plantilla descargada: {dest}")
-    except Exception as e:
-        page.screenshot(path="/tmp/ml_error_descarga.png")
-        print(f"\n❌ Error al descargar: {e}")
-        print("   Captura guardada en /tmp/ml_error_descarga.png")
-        browser.close(); sys.exit(1)
-    browser.close()
+    print("\n=================================================")
+    print("  Categorías agregadas. Revisa la pestaña abierta en Chrome:")
+    print("  si alguna categoría no es la correcta, corrígela ahí mismo")
+    print("  (quitarla y agregar la correcta) y luego dale click a")
+    print("  'Descargar' manualmente. La pestaña queda abierta.")
+    print("=================================================\n")
+
+# Adjuntar la etiqueta REAL que quedó agregada en ML a cada item del plan —
+# es el nombre real de la hoja en el Excel descargado, que puede no ser
+# idéntico a category_name (la categoría "sugerida" por domain_discovery).
+for item in plan:
+    info = categorias_a_agregar.get(item["category_name"])
+    if info and info.get("etiqueta_real"):
+        item["etiqueta_real"] = info["etiqueta_real"]
 
 print("\n=== RESUMEN ===")
 for item in plan:
-    print(f"  {item['producto'][:45]:<45} → {item['category_name']}")
+    real = item.get("etiqueta_real")
+    flecha = f"→ {real}" if real else f"→ {item['category_name']} (no agregada)"
+    print(f"  {item['producto'][:45]:<45} {flecha}")
 
 # Guardar el plan como JSON para que fill-blank-template lo use
 import json as _json

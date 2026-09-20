@@ -1,4 +1,3 @@
-import glob
 import io
 import json
 import os
@@ -10,7 +9,7 @@ from typing import Optional
 import anthropic
 import openpyxl
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from config import ANTHROPIC_API_KEY
@@ -918,8 +917,14 @@ async def generate_from_ml(
 @router.post("/download-template")
 async def download_template(body: dict):
     """
-    Recibe una lista de product_ids, obtiene sus categorías ML de la BD,
-    ejecuta el scraper headless y devuelve la plantilla descargada.
+    Recibe una lista de product_ids, obtiene sus categorías ML de la BD y
+    ejecuta el scraper para AGREGAR esas categorías en la planilla de ML.
+
+    No descarga el archivo automáticamente: la elección de categoría de ML
+    no siempre es la más indicada (ver TOP_LEVEL_EXCLUIDOS en el scraper), así
+    que el scraper deja la pestaña abierta en Chrome para que el usuario la
+    revise/corrija y descargue manualmente — luego la sube en el paso 3.
+    Devuelve un resumen de qué categoría quedó agregada por producto.
     """
     product_ids = body.get("product_ids", [])
     if not product_ids:
@@ -946,6 +951,8 @@ async def download_template(body: dict):
     try:
         result = subprocess.run(
             [venv_python, script, "--file", nombres_file],
+            # ML a veces pide una verificación de seguridad manual en la
+            # ventana del scraper antes de continuar (ver ml_scrape_template.py)
             capture_output=True, text=True, timeout=300,
             cwd=os.path.dirname(script),
         )
@@ -957,109 +964,74 @@ async def download_template(body: dict):
     if result.returncode != 0:
         raise HTTPException(500, f"Error en el scraper:\n{result.stderr[-500:]}")
 
-    # Buscar el archivo más reciente descargado
-    downloads = sorted(
-        glob.glob(os.path.expanduser("~/Downloads/Publicar-*.xlsx")),
-        key=os.path.getmtime, reverse=True,
-    )
-    if not downloads:
-        raise HTTPException(500, "El scraper no descargó ningún archivo")
-
-    # La clasificación de ML puede cambiar con el tiempo (misma consulta,
-    # distinto resultado en días distintos), así que en vez de forzar al
-    # scraper a usar la categoria_ml ya guardada, resincronizamos la BD con
-    # la categoría que el scraper realmente encontró y logró agregar —
-    # verificado contra las hojas reales del archivo descargado — para que
-    # coincida con lo que fill-blank-template va a buscar en el paso 4.
-    try:
-        hojas_reales = set(openpyxl.load_workbook(downloads[0], read_only=True).sheetnames)
-        plan_path = "/tmp/ml_category_plan.json"
-        if os.path.exists(plan_path):
+    # Solo informativo acá — el usuario puede corregir la categoría a mano
+    # antes de descargar, así que categoria_ml se sincroniza de verdad en
+    # fill-blank-template, con el archivo que efectivamente se sube.
+    resumen = []
+    plan_path = "/tmp/ml_category_plan.json"
+    if os.path.exists(plan_path):
+        try:
             with open(plan_path) as f:
                 plan = json.load(f)
-            por_nombre = {p["nombre"]: p for p in productos}
             for item in plan:
-                cat_real = item.get("category_name")
-                p = por_nombre.get(item.get("producto"))
-                if not p or not cat_real or cat_real not in hojas_reales:
-                    continue
-                if p.get("categoria_ml") != cat_real:
-                    db.table("products").update({"categoria_ml": cat_real}).eq("id", p["id"]).execute()
-    except Exception as e:
-        print(f"[download_template] no se pudo resincronizar categoria_ml: {e}")
+                resumen.append({
+                    "producto": item.get("producto"),
+                    "categoria_sugerida": item.get("category_name"),
+                    "categoria_agregada": item.get("etiqueta_real"),
+                })
+        except Exception as e:
+            print(f"[download_template] no se pudo leer el plan: {e}")
 
-    return FileResponse(
-        downloads[0],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=os.path.basename(downloads[0]),
-    )
+    return {
+        "ok": True,
+        "message": "Categorías agregadas en ML. Revisa la pestaña de Chrome, corrige si hace falta y descarga manualmente — luego súbela en el paso 3.",
+        "resumen": resumen,
+    }
 
 
-# ── Login ML via Playwright (sin terminal) ───────────────────────────────────
+# ── Sesión ML (Chrome real, perfil propio de Kobber) ──────────────────────────
+#
+# Chrome bloquea --remote-debugging-port en el perfil normal del usuario (para
+# evitar que procesos externos secuestren sesiones ya logueadas), así que no
+# podemos conectarnos al Chrome que el usuario ya tiene abierto. Usamos un
+# perfil PROPIO de Kobber lanzado aparte (scripts/ml_chrome.py) y solo nos
+# conectamos por CDP — nunca lo lanzamos desde acá. Login con ml_login.py.
+
+ML_KOBBER_CDP_URL = "http://localhost:9223"
+
 
 @router.get("/ml-session-status")
 async def ml_session_status():
-    """Verifica si la sesión ML guardada sigue activa."""
-    import asyncio
+    """Verifica si el Chrome de Kobber está corriendo y con sesión ML activa."""
     from playwright.async_api import async_playwright
-
-    SESSION_FILE = "/tmp/ml_session.json"
-
-    if not os.path.exists(SESSION_FILE):
-        return {"active": False, "reason": "no_session"}
 
     async def check():
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            ctx  = await browser.new_context(storage_state=SESSION_FILE)
+            try:
+                browser = await p.chromium.connect_over_cdp(ML_KOBBER_CDP_URL)
+            except Exception:
+                return {"active": False, "reason": "no_session"}
+            ctx  = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await ctx.new_page()
-            await page.goto(
-                "https://www.mercadolibre.com.co/publicar-masivamente/categories",
-                wait_until="domcontentloaded", timeout=20_000,
-            )
-            url = page.url
-            await browser.close()
-            return url
+            try:
+                await page.goto(
+                    "https://www.mercadolibre.com.co/publicar-masivamente/categories",
+                    wait_until="domcontentloaded", timeout=20_000,
+                )
+                url = page.url
+            except Exception as e:
+                return {"active": False, "reason": str(e)}
+            finally:
+                await page.close()  # cerrar solo la pestaña que abrimos
+            if "login" in url or "registration" in url:
+                return {"active": False, "reason": "expired"}
+            return {"active": True, "url": url}
 
-    try:
-        url = await check()
-        if "login" in url or "registration" in url:
-            return {"active": False, "reason": "expired"}
-        return {"active": True, "url": url}
-    except Exception as e:
-        return {"active": False, "reason": str(e)}
+    return await check()
 
 
-@router.post("/ml-login")
-async def ml_login():
-    """
-    Abre un browser visible, espera que el usuario haga login en ML
-    y guarda la sesión automáticamente al detectar la página de categorías.
-    """
-    import asyncio
-    from playwright.async_api import async_playwright
-
-    SESSION_FILE = "/tmp/ml_session.json"
-    ML_URL       = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
-
-    async def do_login():
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, slow_mo=50)
-            ctx     = await browser.new_context()
-            page    = await ctx.new_page()
-            await page.goto(ML_URL)
-
-            # Esperar hasta 3 minutos a que el usuario llegue a la página de categorías
-            await page.wait_for_url("**/publicar-masivamente/categories**", timeout=180_000)
-
-            await ctx.storage_state(path=SESSION_FILE)
-            await browser.close()
-
-    try:
-        await do_login()
-        return {"ok": True, "message": "Sesión guardada correctamente"}
-    except Exception as e:
-        raise HTTPException(500, f"Error al guardar sesión: {e}")
+# Renovar la sesión se hace por terminal con `python3 scripts/ml_login.py`
+# (abre el mismo perfil persistente que revisa /ml-session-status arriba).
 
 
 # ── Inferencia de atributos faltantes con Claude ──────────────────────────────
@@ -1184,6 +1156,32 @@ async def fill_blank_template(
 
     # ── Cargar BD con categoria_ml y atributos ────────────────────────────────
     db = get_client()
+
+    # Resincronizar categoria_ml con las hojas reales del archivo que el
+    # usuario efectivamente descargó y subió acá — la categoría que el
+    # scraper agregó (o la que el usuario corrigió a mano en ML antes de
+    # descargar) puede diferir de lo que ya había guardado en la BD.
+    plan_path = "/tmp/ml_category_plan.json"
+    if os.path.exists(plan_path):
+        try:
+            with open(plan_path) as f:
+                plan = json.load(f)
+            nombres_plan = [item["producto"] for item in plan if item.get("producto")]
+            por_nombre = {
+                p["nombre"]: p for p in
+                db.table("products").select("id, nombre, categoria_ml").in_("nombre", nombres_plan).execute().data
+            } if nombres_plan else {}
+            hojas_set = set(hojas)
+            for item in plan:
+                cat_real = item.get("etiqueta_real") or item.get("category_name")
+                p = por_nombre.get(item.get("producto"))
+                if not p or not cat_real or cat_real not in hojas_set:
+                    continue
+                if p.get("categoria_ml") != cat_real:
+                    db.table("products").update({"categoria_ml": cat_real}).eq("id", p["id"]).execute()
+        except Exception as e:
+            print(f"[fill_blank_template] no se pudo resincronizar categoria_ml: {e}")
+
     query = db.table("products").select(
         "id, nombre, descripcion, marca, categoria_ml, caracteristicas, "
         "product_attributes(nombre, valor, unidad, variant_id), "
@@ -1253,13 +1251,14 @@ async def fill_blank_template(
     # ── Detectar faltantes: productos sin hoja coincidente ────────────────────
     hojas_set = set(hojas)
     publicados: list = []   # {nombre, clave, hoja}
-    faltantes:  list = []   # {nombre, clave, categoria_ml, razon}
+    faltantes:  list = []   # {product_id, nombre, clave, categoria_ml, razon}
 
     for cat, prods in cat_to_products.items():
         if cat not in hojas_set:
             for p in prods:
                 for v in (p.get("product_variants") or []):
                     faltantes.append({
+                        "product_id":   p["id"],
                         "nombre":       p["nombre"][:60],
                         "clave":        v.get("clave") or v.get("codigo") or "—",
                         "categoria_ml": cat,
@@ -1401,6 +1400,7 @@ async def fill_blank_template(
     resumen = _b64.b64encode(json.dumps({
         "publicados": publicados,
         "faltantes":  faltantes,
+        "hojas":      hojas,  # hojas reales del archivo subido — para reasignar categoria_ml a mano
     }, ensure_ascii=False).encode()).decode()
 
     buf = BytesIO()

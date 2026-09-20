@@ -26,6 +26,7 @@ class ProductUpdate(BaseModel):
     seccion:         Optional[str]       = None
     caracteristicas: Optional[list[str]] = None
     estado:          Optional[str]       = None
+    categoria_ml:    Optional[str]       = None
 
 
 class VariantCreate(BaseModel):

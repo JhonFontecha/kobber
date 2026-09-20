@@ -1925,12 +1925,10 @@ function FlowTab({ onToast }) {
   const [pageNum,     setPageNum]     = useState('')
   const searchFileRef = useRef()
 
-  // ── Paso 2: descargar plantillas ────────────────────────────────────────────
+  // ── Paso 2: agregar categorías en ML ─────────────────────────────────────────
   const [downloading,   setDownloading]   = useState(false)
-  const [templateBlob,  setTemplateBlob]  = useState(null)
-  const [templateName,  setTemplateName]  = useState(null)
-  const [mlLogging,     setMlLogging]     = useState(false)
   const [mlSession,     setMlSession]     = useState(null) // null=checking, true=active, false=expired
+  const [categorySummary, setCategorySummary] = useState(null) // [{producto, categoria_sugerida, categoria_agregada}]
 
   const checkMlSession = async () => {
     setMlSession(null)
@@ -1942,19 +1940,6 @@ function FlowTab({ onToast }) {
     }
   }
 
-  const handleMlLogin = async () => {
-    setMlLogging(true)
-    onToast({ type: 'ok', text: 'Browser abierto — inicia sesión en ML y navega a la página de categorías.' })
-    try {
-      await api.post('/api/analyzer/ml-login', {})
-      onToast({ type: 'ok', text: '✅ Sesión ML guardada. Ya puedes descargar plantillas.' })
-    } catch (e) {
-      onToast({ type: 'error', text: e.message })
-    } finally {
-      setMlLogging(false)
-    }
-  }
-
   // ── Paso 3: subir plantilla ─────────────────────────────────────────────────
   const [templateFile, setTemplateFile] = useState(null)
   const templateRef = useRef()
@@ -1963,6 +1948,8 @@ function FlowTab({ onToast }) {
   const [margen,   setMargen]   = useState('')
   const [filling,  setFilling]  = useState(false)
   const [fillResumen, setFillResumen] = useState(null)
+  const [reasignaciones, setReasignaciones] = useState({}) // {categoria_ml_original: hoja_elegida}
+  const [reasignando, setReasignando] = useState(false)
 
   // ── Helpers paso 1 ──────────────────────────────────────────────────────────
   const initVariantPcts = (prods, pctMap) => {
@@ -2044,9 +2031,13 @@ function FlowTab({ onToast }) {
     setStep(2)
   }
 
-  // ── Helper paso 2: descargar plantillas via scraper ──────────────────────────
+  // ── Helper paso 2: agregar categorías en ML via scraper ──────────────────────
+  const [categoriasListas, setCategoriasListas] = useState(false)
+
   const handleDownloadTemplate = async () => {
     setDownloading(true)
+    setCategorySummary(null)
+    setCategoriasListas(false)
     try {
       const product_ids = products.map(p => p.id)
       const r = await fetch('/api/analyzer/download-template', {
@@ -2054,21 +2045,12 @@ function FlowTab({ onToast }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ product_ids }),
       })
-      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error') }
-      const blob = await r.blob()
-      const cd   = r.headers.get('content-disposition') || ''
-      const name = cd.match(/filename=([^;]+)/)?.[1] || `Publicar-${Date.now()}.xlsx`
-      setTemplateBlob(blob)
-      setTemplateName(name)
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.detail || 'Error')
 
-      // Descarga automática para el usuario
-      const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href = url; a.download = name; a.click()
-      URL.revokeObjectURL(url)
-
-      onToast({ type: 'ok', text: 'Plantilla descargada. Continúa al paso 3.' })
-      setStep(3)
+      setCategorySummary(data.resumen || [])
+      setCategoriasListas(true)
+      onToast({ type: 'ok', text: data.message || 'Categorías agregadas en ML.' })
     } catch (e) {
       onToast({ type: 'error', text: e.message })
     } finally {
@@ -2078,16 +2060,13 @@ function FlowTab({ onToast }) {
 
   // ── Helper paso 3 → paso 4 ───────────────────────────────────────────────────
   const handleContinueToStep4 = () => {
-    if (!templateFile && !templateBlob) return
+    if (!templateFile) return
     setStep(4)
   }
 
   // ── Helper paso 4: rellenar plantilla ────────────────────────────────────────
   const handleFill = async () => {
-    const file = templateFile || (templateBlob
-      ? new File([templateBlob], templateName || 'plantilla.xlsx',
-          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      : null)
+    const file = templateFile
     if (!file) return
     setFilling(true)
     setFillResumen(null)
@@ -2105,8 +2084,9 @@ function FlowTab({ onToast }) {
       const faltantes  = parseInt(r.headers.get('X-Faltantes') || '0')
       const resumenB64 = r.headers.get('X-Resumen')
       if (resumenB64) {
-        try { setFillResumen(JSON.parse(atob(resumenB64))) } catch {}
+        try { setFillResumen(JSON.parse(decodeURIComponent(escape(atob(resumenB64))))) } catch {}
       }
+      setReasignaciones({})
 
       const blob = await r.blob()
       const url  = URL.createObjectURL(blob)
@@ -2125,6 +2105,29 @@ function FlowTab({ onToast }) {
       onToast({ type: 'error', text: e.message })
     } finally {
       setFilling(false)
+    }
+  }
+
+  // ── Helper paso 4: reasignar categoria_ml a una hoja real y reintentar ──────
+  const handleReasignarYReintentar = async () => {
+    const entries = Object.entries(reasignaciones).filter(([, hoja]) => hoja)
+    if (!entries.length || !fillResumen) return
+    setReasignando(true)
+    try {
+      for (const [catOriginal, hojaElegida] of entries) {
+        const productIds = [...new Set(
+          fillResumen.faltantes.filter(f => f.categoria_ml === catOriginal).map(f => f.product_id)
+        )]
+        for (const pid of productIds) {
+          await api.patch(`/api/products/${pid}`, { categoria_ml: hojaElegida })
+        }
+      }
+      onToast({ type: 'ok', text: 'Categorías reasignadas. Reintentando...' })
+      await handleFill()
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    } finally {
+      setReasignando(false)
     }
   }
 
@@ -2326,12 +2329,13 @@ function FlowTab({ onToast }) {
 
           <div style={cardStyle}>
             <p style={{ fontSize: '14px', fontWeight: '600', marginBottom: 4 }}>
-              Descargar plantillas de ML
+              Agregar categorías en ML
             </p>
             <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 16 }}>
-              El sistema ejecutará el scraper para descargar la plantilla con todas las categorías
-              necesarias para los productos seleccionados. El navegador se abrirá automáticamente
-              (la sesión ya está guardada).
+              El sistema agrega en ML las categorías necesarias para los productos seleccionados
+              (la ventana de Chrome se abre/reutiliza automáticamente). No descarga el archivo solo:
+              revisa la pestaña, corrige la categoría si hace falta, descárgala vos mismo y luego
+              súbela en el paso 3.
             </p>
 
             <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: 16 }}>
@@ -2347,16 +2351,6 @@ function FlowTab({ onToast }) {
                 )}
               </div>
             </div>
-
-            {templateBlob ? (
-              <div style={{ background: '#E8F5E9', border: '1px solid #A5D6A7', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 16, fontSize: '13px', color: '#1B5E20', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span>✅ Plantilla descargada: <strong>{templateName}</strong></span>
-                <Btn variant="ghost" style={{ padding: '3px 10px', fontSize: '11px', marginLeft: 'auto' }}
-                  onClick={() => { const u = URL.createObjectURL(templateBlob); const a = document.createElement('a'); a.href=u; a.download=templateName; a.click(); URL.revokeObjectURL(u) }}>
-                  Volver a descargar
-                </Btn>
-              </div>
-            ) : null}
 
             {/* Estado de sesión ML */}
             <div style={{
@@ -2374,28 +2368,51 @@ function FlowTab({ onToast }) {
                   ? 'Verificando sesión de MercadoLibre...'
                   : mlSession
                     ? 'Sesión activa — puedes descargar plantillas'
-                    : 'Sin sesión del scraper — usa "🔑 Renovar sesión ML" (diferente a tener ML abierto en el browser)'}
+                    : 'Sin sesión del scraper — corre "python3 scripts/ml_login.py" desde la terminal para renovarla'}
               </span>
-              <Btn variant="ghost" onClick={checkMlSession} disabled={mlLogging}
+              <Btn variant="ghost" onClick={checkMlSession}
                 style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
                 {mlSession === null ? '...' : '↻ Verificar'}
               </Btn>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Btn onClick={handleDownloadTemplate} disabled={downloading || mlLogging || mlSession === false}>
-                {downloading ? 'Ejecutando scraper... (1-2 min)' : '⬇ Descargar plantillas'}
+              <Btn onClick={handleDownloadTemplate} disabled={downloading || mlSession === false}>
+                {downloading ? 'Agregando categorías... (1-2 min)' : '🔍 Agregar categorías en ML'}
               </Btn>
-              {templateBlob && (
+              {categoriasListas && (
                 <Btn onClick={() => setStep(3)}>
-                  Continuar al paso 3 →
+                  Ya descargué → paso 3
                 </Btn>
               )}
-              <Btn variant="ghost" onClick={handleMlLogin} disabled={mlLogging || downloading}
-                style={{ fontSize: '12px', padding: '6px 12px', marginLeft: 'auto' }}>
-                {mlLogging ? 'Esperando login...' : '🔑 Renovar sesión ML'}
-              </Btn>
             </div>
+
+            {categorySummary?.length > 0 && (
+              <div style={{ marginTop: 12, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ padding: '8px 12px', background: 'var(--bg)', fontSize: '12px', fontWeight: 600 }}>
+                  Categorías agregadas en ML — revisa en la pestaña de Chrome antes de descargar
+                </div>
+                {categorySummary.map((s, i) => {
+                  const sinAgregar = !s.categoria_agregada
+                  const distinta   = !sinAgregar && s.categoria_sugerida && s.categoria_agregada !== s.categoria_sugerida
+                  return (
+                    <div key={i} style={{
+                      display: 'flex', justifyContent: 'space-between', gap: 10,
+                      padding: '8px 12px', fontSize: '12px',
+                      background: sinAgregar ? '#FFF3E0' : 'transparent',
+                      borderTop: '1px solid var(--border)',
+                    }}>
+                      <span>{s.producto}</span>
+                      <span style={{ color: sinAgregar ? '#E65100' : 'var(--text-tertiary)', textAlign: 'right' }}>
+                        {s.categoria_agregada || '— no se pudo agregar —'}
+                        {distinta ? ` (sugerida: ${s.categoria_sugerida})` : ''}
+                        {sinAgregar ? ' ⚠️' : ''}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2449,9 +2466,9 @@ function FlowTab({ onToast }) {
 
             <Btn
               onClick={handleContinueToStep4}
-              disabled={!templateFile && !templateBlob}
+              disabled={!templateFile}
             >
-              {templateFile ? 'Continuar al paso 4 →' : templateBlob ? 'Usar plantilla del paso 2 →' : 'Selecciona un archivo'}
+              {templateFile ? 'Continuar al paso 4 →' : 'Selecciona un archivo'}
             </Btn>
           </div>
         </div>
@@ -2464,7 +2481,7 @@ function FlowTab({ onToast }) {
             <Btn variant="ghost" style={{ padding: '5px 10px', fontSize: '12px' }}
               onClick={() => setStep(3)}>← Paso 3</Btn>
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-              {products.length} producto(s) → {templateFile?.name || templateName}
+              {products.length} producto(s) → {templateFile?.name}
             </span>
           </div>
 
@@ -2583,12 +2600,35 @@ function FlowTab({ onToast }) {
                                 </div>
                               )
                             })}
+                            {fillResumen.hojas?.length > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, paddingLeft: 12 }}>
+                                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>O asociar a hoja real:</span>
+                                <select
+                                  value={reasignaciones[cat] || ''}
+                                  onChange={e => setReasignaciones(r => ({ ...r, [cat]: e.target.value }))}
+                                  style={{ fontSize: '11px', padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg)' }}
+                                >
+                                  <option value="">— elegir hoja del Excel —</option>
+                                  {fillResumen.hojas.map(h => (
+                                    <option key={h} value={h}>{h}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
                           </div>
                         )
                       })}
-                      <p style={{ fontSize: '11px', color: '#BF360C', marginTop: 6, fontStyle: 'italic', borderTop: '1px solid #FFE082', paddingTop: 8 }}>
-                        Vuelve al Paso 2 y agrega: "{[...new Set(fillResumen.faltantes.map(f => f.categoria_ml))].join('", "')}"
-                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, borderTop: '1px solid #FFE082', paddingTop: 8 }}>
+                        <p style={{ fontSize: '11px', color: '#BF360C', fontStyle: 'italic', margin: 0 }}>
+                          Vuelve al Paso 2 y agrega: "{[...new Set(fillResumen.faltantes.map(f => f.categoria_ml))].join('", "')}"
+                        </p>
+                        {Object.values(reasignaciones).some(Boolean) && (
+                          <Btn onClick={handleReasignarYReintentar} disabled={reasignando || filling}
+                            style={{ fontSize: '11px', padding: '5px 12px', flexShrink: 0 }}>
+                            {reasignando || filling ? 'Reintentando...' : 'Reasignar y reintentar'}
+                          </Btn>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
