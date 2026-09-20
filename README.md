@@ -50,8 +50,9 @@ esto una vez (abre un Chrome real para que te loguees a mano):
 backend/venv/bin/python3 scripts/ml_login.py
 ```
 
-La sesión expira cada tanto — cuando eso pase, correr el mismo comando de nuevo (o usar el botón
-correspondiente en el panel admin, que hace lo mismo desde el backend).
+La sesión expira cada tanto — cuando eso pase, correr el mismo comando de nuevo. El publicador
+(paso 2 del panel admin) tiene un botón "↻ Verificar" para chequear si sigue activa, pero renovarla
+se hace siempre por terminal con este comando — no hay botón que dispare el login desde el backend.
 
 ## Correr en desarrollo
 

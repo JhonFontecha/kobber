@@ -188,6 +188,11 @@ Diseño: Tailwind con paleta custom "graphite" (ver `tailwind.config.js`), estil
 
 ### Scripts de automatización ML (`scripts/`)
 
+**Antes de diagnosticar cualquier falla de login/sesión/categorización de ML, leer
+`scripts/ML_RUNBOOK.md`** — checklist de diagnóstico y contexto de por qué el
+Chrome de este flujo se maneja como se maneja (relevante sobre todo en una
+máquina donde el flujo no se corrió antes).
+
 Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backend, invocados manualmente o desde `POST /api/analyzer/download-template`):
 
 1. `ml_chrome.py` — lanza (o reutiliza) un Chrome real, con perfil propio de Kobber en `/tmp/ml_chrome_profile`, como proceso del sistema operativo (`subprocess.Popen`, no `playwright.launch`) escuchando CDP en el puerto 9223. Se lanza aparte porque Playwright mata cualquier browser que él mismo lanza en cuanto su conexión se cierra — así la misma ventana sobrevive entre corridas de los scripts de abajo. Chrome real (no el Chromium de pruebas) porque ML bloquea ese último como navegador automatizado ("Alcanzaste el límite de intentos"). No se puede usar el Chrome normal del usuario: bloquea `--remote-debugging-port` en su perfil por defecto (protección anti-secuestro de sesión vía CDP).

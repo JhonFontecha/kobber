@@ -19,7 +19,23 @@ from pathlib import Path
 PROFILE_DIR    = Path("/tmp/ml_chrome_profile")
 CDP_PORT       = 9223
 KOBBER_CDP_URL = f"http://localhost:{CDP_PORT}"
-CHROME_BIN     = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# Ubicaciones típicas de Chrome en Mac — no asumir la ruta de una sola
+# máquina (ver la corrección análoga que necesitó DOWNLOAD_DIR).
+_CHROME_BIN_CANDIDATES = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+]
+
+
+def _find_chrome_bin() -> str:
+    for path in _CHROME_BIN_CANDIDATES:
+        if Path(path).exists():
+            return path
+    raise RuntimeError(
+        "No se encontró Google Chrome instalado (se buscó en "
+        f"{' y '.join(_CHROME_BIN_CANDIDATES)}). Instálalo desde google.com/chrome."
+    )
 
 
 def _cdp_alive() -> bool:
@@ -36,10 +52,12 @@ def ensure_kobber_chrome(timeout: float = 20.0) -> None:
     if _cdp_alive():
         return
 
+    chrome_bin = _find_chrome_bin()
+
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     subprocess.Popen(
         [
-            CHROME_BIN,
+            chrome_bin,
             f"--remote-debugging-port={CDP_PORT}",
             f"--user-data-dir={PROFILE_DIR}",
             "--no-first-run",
