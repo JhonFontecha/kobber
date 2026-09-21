@@ -56,7 +56,11 @@ se hace siempre por terminal con este comando — no hay botón que dispare el l
 
 ## Correr en desarrollo
 
-Dos servidores en simultáneo, cada uno en su propia terminal:
+**Opción rápida (sin terminal):** doble clic en `Iniciar Kobber.command` en la raíz del repo —
+levanta backend y frontend, abre el navegador solo, y se apaga cerrando la ventana o con Ctrl+C.
+Requiere haber hecho la instalación de arriba al menos una vez.
+
+**Manual**, dos servidores en simultáneo, cada uno en su propia terminal:
 
 ```bash
 # Backend — desde la raíz del repo

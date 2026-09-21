@@ -1,7 +1,12 @@
 """
 Descarga de imágenes desde trupper.com.
-- Método original: adivinando nombres de archivo
-- Método nuevo: scraping del BancoContenidoDigital oficial de Trupper
+- Método principal: buscador real del Banco de Contenido Digital de Truper
+  (rediseñado — la URL vieja "BancoContenidoDigital/index.php?r=..." ya no
+  existe, redirige a una landing genérica). Da la lista EXACTA de imágenes
+  por producto en vez de adivinar sufijos de archivo, así que no se pierden
+  fotos que existan con un sufijo no contemplado.
+- Respaldo: adivinar nombres de archivo (candidatos fijos), por si el buscador
+  no encuentra la clave.
 """
 
 import asyncio
@@ -16,55 +21,78 @@ from database import get_client
 
 router = APIRouter()
 
-BASE_URL    = "https://www.truper.com/media/import/imagenes/"
-BANCO_URL   = "https://www.truper.com/BancoContenidoDigital"
-TIMEOUT     = 12.0
-MAX_VARS    = 5
-_HEADERS    = {
+BASE_URL     = "https://www.truper.com/media/import/imagenes/"
+BANCO_URL    = "https://www.truper.com/banco-contenido-digital"
+BANCO_SEARCH = f"{BANCO_URL}/searching/searchByWord"
+TIMEOUT      = 12.0
+MAX_VARS     = 5
+_HEADERS     = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
     "Accept-Language": "es-MX,es;q=0.9,en;q=0.8",
+    # El sitio nuevo exige esta cookie de región (se setea al visitar la
+    # home) para no devolver 500 en /searching/searchByWord.
+    "Cookie": "reg=mx",
 }
+
+# Sufijos de foto de EMPAQUE (no de producto) que trae el sitio nuevo, además
+# de EI/EIND que ya conocíamos: "E" = tarjeta/blister, "EM" = caja máster.
+_PACKAGING_SUFFIXES = {"E", "EI", "EIND", "EM"}
+_SUFFIX_RE = re.compile(r"\+([A-Za-z]+)\d*\.(?:jpg|jpeg|png|webp)$", re.IGNORECASE)
+
+
+def _is_product_photo(url: str) -> bool:
+    """False si la URL es una foto de empaque (blister/inner/individual/máster)."""
+    m = _SUFFIX_RE.search(url)
+    if not m:
+        return True  # sin sufijo -> foto base del producto
+    return m.group(1).upper() not in _PACKAGING_SUFFIXES
 
 
 async def _scrape_banco(clave: str, client: httpx.AsyncClient) -> dict:
     """
-    Busca la clave en el BancoContenidoDigital de Trupper.
-    Devuelve {trupper_id, imagenes: [...urls...], found: bool}
+    Busca la clave en el buscador real del Banco de Contenido Digital de
+    Truper (API JSON) y trae la lista exacta de imágenes desde la página de
+    detalle del producto. Devuelve {trupper_id, imagenes: [...urls...], found}.
+
+    El buscador hace match por substring y puede devolver varios productos
+    (ej. buscar "T203-6" también devuelve "T203-6X") — se exige coincidencia
+    EXACTA de clave para no traer las fotos de un producto distinto.
     """
-    search_url = (
-        f"{BANCO_URL}/index.php?r=site%2Fsearch"
-        f"&Productos%5Bclave%5D={clave}"
-    )
     try:
-        r = await client.get(search_url, headers=_HEADERS, follow_redirects=True, timeout=TIMEOUT)
+        r = await client.get(
+            BANCO_SEARCH, params={"q": clave}, headers=_HEADERS, timeout=TIMEOUT,
+        )
+        data = r.json()
     except Exception:
         return {"clave": clave, "trupper_id": None, "imagenes": [], "found": False}
 
-    if r.status_code != 200:
+    if not data.get("success"):
         return {"clave": clave, "trupper_id": None, "imagenes": [], "found": False}
 
-    # Extraer el ID de Trupper (data-id del primer card)
-    ids = re.findall(r'data-id="(\d+)"', r.text)
-    if not ids:
+    match = next(
+        (item for item in data.get("results", [])
+         if str(item.get("clave", "")).strip().lower() == clave.strip().lower()),
+        None,
+    )
+    if not match or not match.get("url"):
         return {"clave": clave, "trupper_id": None, "imagenes": [], "found": False}
 
-    trupper_id = ids[0]
+    trupper_id = match.get("id_productos")
 
-    # Cargar página de detalle → tiene TODAS las imágenes
-    detail_url = f"{BANCO_URL}/index.php?r=producto/view&id={trupper_id}"
     try:
-        r2 = await client.get(detail_url, headers=_HEADERS, follow_redirects=True, timeout=TIMEOUT)
+        r2 = await client.get(match["url"], headers=_HEADERS, timeout=TIMEOUT)
     except Exception:
         return {"clave": clave, "trupper_id": trupper_id, "imagenes": [], "found": False}
 
     imgs = re.findall(
-        r'src="(https://www\.truper\.com/[^"]+\.(?:jpg|png|jpeg|webp))"',
+        r'src="(https://www\.truper\.com/media/import/imagenes/[^"]+\.(?:jpg|png|jpeg|webp))"',
         r2.text, re.IGNORECASE,
     )
+    imgs = [u for u in imgs if _is_product_photo(u)]
     # Deduplicar manteniendo orden
     seen: set = set()
     unique = [u for u in imgs if not (u in seen or seen.add(u))]
@@ -103,8 +131,17 @@ async def _check_url(client: httpx.AsyncClient, url: str) -> Optional[str]:
 
 
 async def _fetch_for_clave(clave: str) -> list[str]:
-    candidates = _build_candidates(clave)
+    """
+    Primero el buscador real de Truper (trae la lista exacta de fotos, sin
+    adivinar sufijos). Si no encuentra la clave ahí, cae al método viejo de
+    adivinar nombres de archivo fijos como respaldo.
+    """
     async with httpx.AsyncClient() as client:
+        banco = await _scrape_banco(clave, client)
+        if banco["found"]:
+            return banco["imagenes"]
+
+        candidates = _build_candidates(clave)
         results = await asyncio.gather(*[_check_url(client, u) for u in candidates])
     return [u for u in results if u]
 

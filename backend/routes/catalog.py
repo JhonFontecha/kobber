@@ -178,7 +178,8 @@ REGLAS:
 6. No repitas el mismo sinonimo en dos titulos.
 7. Si el producto tiene variantes de tamano, elige la mas representativa o usa "Varias Medidas".
 8. Usa terminologia colombiana de ferreteria — ver la lista de arriba, no mexicanismos.
-9. Sin acentos ni tildes en los titulos (ML los indexa mejor sin ellos).
+9. Usa acentos, tildes y enie normales del espanol donde corresponda (ej. "Electricista",
+   "Pulgadas", "Ponchadora") — español latinoamericano de Colombia, no lo omitas.
 10. No uses palabras de relleno sin valor de busqueda (profesional, calidad, nuevo, garantia).
 11. PULGADAS: si la medida va en pulgadas, usa el simbolo " pegado al numero, sin espacio
     entre el numero y el simbolo (9", 8", 3", 1/2" — nunca "9 "" ni "9 Pulgadas").

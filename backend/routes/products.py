@@ -50,6 +50,9 @@ class VariantUpdate(BaseModel):
     unidades_caja:       Optional[int]   = None
     unidades_master:     Optional[int]   = None
     stock:               Optional[int]   = None
+    stock_ml:            Optional[int]   = None
+    porcentaje_kobber:   Optional[float] = None
+    porcentaje_ml:       Optional[float] = None
     estado:              Optional[str]   = None
 
 
@@ -91,7 +94,8 @@ def _search_variants_by_codes(db, codes: list[str]):
 
 _SELECT = (
     "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
-    "nc, unidades_caja, stock, estado), product_images(url, orden)"
+    "nc, unidades_caja, stock, stock_ml, porcentaje_kobber, porcentaje_ml, estado), "
+    "product_images(id, url, orden, variant_id)"
 )
 
 
@@ -204,7 +208,8 @@ def search_products(q: Optional[str] = None):
     db = get_client()
     select_clause = (
         "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
-        "nc, unidades_caja, stock, estado)"
+        "nc, unidades_caja, stock, stock_ml, porcentaje_kobber, porcentaje_ml, estado), "
+        "product_images(id, url, orden, variant_id)"
     )
 
     if not q or not q.strip():
@@ -309,6 +314,36 @@ def update_product(product_id: str, body: ProductUpdate):
 def delete_product(product_id: str):
     db = get_client()
     db.table("products").delete().eq("id", product_id).execute()
+    return {"ok": True}
+
+
+# ── Fotos (agregar/quitar por link a mano, desde el panel de edición) ───────────
+
+class ImageAdd(BaseModel):
+    url: str
+    variant_id: Optional[str] = None
+
+
+@router.post("/{product_id}/images")
+def add_product_image(product_id: str, body: ImageAdd):
+    db = get_client()
+    orden = len(
+        db.table("product_images").select("id").eq("product_id", product_id).execute().data
+    )
+    result = db.table("product_images").insert({
+        "product_id": product_id,
+        "variant_id": body.variant_id,
+        "url": body.url,
+        "orden": orden,
+        "fuente": "manual",
+    }).execute()
+    return result.data[0]
+
+
+@router.delete("/images/{image_id}")
+def delete_product_image(image_id: str):
+    db = get_client()
+    db.table("product_images").delete().eq("id", image_id).execute()
     return {"ok": True}
 
 

@@ -109,6 +109,12 @@ Tablas principales: `products`, `product_variants`, `product_attributes`, `produ
 - `product_variants.precio_distribuidor` es el precio base (costo); el precio de venta se calcula
   al vuelo aplicando un margen (`precio_venta = precio_distribuidor * (1 + margen/100)`), nunca se
   persiste el precio de venta.
+- `product_variants.stock` = stock real (físico); `product_variants.stock_ml` = stock que se manda
+  al Excel de ML, independiente del real (default 100 a nivel de columna). Igual con el margen:
+  `porcentaje_kobber` (tienda pública) y `porcentaje_ml` (Excel de ML) son columnas separadas y
+  persistentes por variante — antes el margen nunca se guardaba, se pasaba como parámetro en cada
+  request. `fill_blank_template` usa `porcentaje_ml` si está seteado, si no cae al query param
+  `margen` de siempre.
 - `product_attributes` puede ser a nivel de familia de producto (`variant_id` nulo) o por variante.
 - Imágenes y archivos ya no viven en `backend/storage/` local — todo vive en Supabase Storage (migrado
   desde SQLite + filesystem en mayo 2026).
@@ -258,3 +264,12 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
   substring, y filtrando ese respaldo con `TOP_LEVEL_EXCLUIDOS` — si aparece un caso nuevo que ni
   eso resuelve, sumarlo a `CATEGORY_OVERRIDES`.
 - El servidor de búsqueda pública de ML (`api.mercadolibre.com/sites/MCO/search` y `/products/search`) ahora devuelve 403 (`PolicyAgent`, firewall anti-bot) para requests sin sesión — incluso navegando con un browser real headless. Sólo `domain_discovery` (usado por `get_ml_category`) sigue público. Cualquier feature que necesite traer resultados de búsqueda reales de ML requiere sesión logueada vía Playwright (`ml_login.py`) o una app OAuth propia registrada en developers.mercadolibre.com — no hay atajo sin eso.
+- El Banco de Contenido Digital de Truper (fotos de producto) cambió de sitio por completo en 2026 —
+  la URL vieja `BancoContenidoDigital/index.php?r=site/search` ya no existe, redirige a una landing
+  genérica sin resultados. `images.py::_scrape_banco` usa la API nueva
+  (`banco-contenido-digital/searching/searchByWord?q=...`, requiere el header `Cookie: reg=mx`, si
+  no responde 500) y es ahora el método PRIMARIO de `_fetch_for_clave` — trae la lista exacta de
+  fotos del producto en vez de adivinar sufijos de archivo. El sitio nuevo también agregó sufijos de
+  empaque no contemplados antes (`+E{n}` = tarjeta/blister, `+EM{n}` = caja máster, además de
+  `+EI{n}`/`+EIND{n}` que ya se excluían) — filtrados en `_is_product_photo`. El método viejo de
+  adivinar (`_build_candidates`) queda solo como respaldo si el buscador no encuentra la clave.

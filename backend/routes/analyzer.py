@@ -169,6 +169,9 @@ _ML_FIELD_KEYWORDS: dict[str, list[str]] = {
     "costo_envio":      ["costo de envío", "costo de envio"],
     "retiro_persona":   ["retiro en persona"],
     "formato_venta":    ["formato de venta"],
+    "forma_envio":      ["forma de envío", "forma de envio"],
+    "garantia_tipo":    ["tipo de garantía", "tipo de garantia"],
+    "garantia_tiempo":  ["tiempo de garantía", "tiempo de garantia"],
 }
 
 _PACK_KEYWORDS_RE = re.compile(
@@ -1371,7 +1374,8 @@ async def fill_blank_template(
     query = db.table("products").select(
         "id, nombre, descripcion, marca, categoria_ml, caracteristicas, "
         "product_attributes(nombre, valor, unidad, variant_id), "
-        "product_variants(id, clave, codigo, nc, precio_distribuidor, stock, "
+        "product_variants(id, clave, codigo, nc, precio_distribuidor, stock, stock_ml, "
+        "porcentaje_kobber, porcentaje_ml, "
         "titulos_sugeridos, product_attributes(nombre, valor, unidad)), "
         "product_images(url, orden, variant_id)"
     ).not_.is_("categoria_ml", "null")
@@ -1502,9 +1506,12 @@ async def fill_blank_template(
 
             for v in (p.get("product_variants") or []):
                 clave  = str(v.get("clave") or "").strip()
+                codigo = str(v.get("codigo") or "").strip()
                 precio = v.get("precio_distribuidor")
-                if precio and margen:
-                    precio = round(precio * (1 + margen / 100), 2)
+                pct_ml = v.get("porcentaje_ml")
+                pct_ml = pct_ml if pct_ml is not None else margen
+                if precio and pct_ml:
+                    precio = round(precio * (1 + pct_ml / 100), 2)
 
                 # Atributos de variante
                 variante_attrs = {
@@ -1528,19 +1535,24 @@ async def fill_blank_template(
                             ws.cell(first_empty, cols[field]).value = val
 
                     w("titulo",           titulo)
-                    w("sku",              clave)
+                    w("sku",              codigo)
                     w("modelo",           clave)
                     w("marca",            p.get("marca", ""))
                     w("descripcion",      p.get("descripcion", ""))
-                    stock_val = stocks_map.get(str(p["id"]), stocks_map.get(p["id"], 100))
-                    w("stock", int(stock_val) if stock_val is not None else 100)
+                    stock_default = v.get("stock_ml")
+                    stock_val = stocks_map.get(str(p["id"]), stocks_map.get(p["id"]))
+                    if stock_val is None:
+                        stock_val = stock_default if stock_default is not None else 100
+                    w("stock", int(stock_val))
                     w("condicion",        "Nuevo")
                     w("formato_venta",    _detectar_formato_venta(p.get("nombre", "")))
-                    # "Código universal de producto" siempre va vacío: no es lo mismo que
-                    # el NC (cantidad por empaque) y Kobber no tiene EAN/UPC/GTIN reales
-                    # cargados. "Otra razón" tampoco es válido — ML rechaza la fila entera
-                    # si se manda cualquier valor que no sea un código real.
+                    # ML rechaza la fila si se manda cualquier valor que no sea un código
+                    # real o esta opción exacta — nunca "Otra razón".
+                    w("codigo_universal", "El producto no tiene código registrado")
                     w("costo_envio",      "A cargo del comprador")
+                    w("forma_envio",      "Mercado Envíos")
+                    w("garantia_tipo",    "Garantía del vendedor")
+                    w("garantia_tiempo",  "30")
                     w("retiro_persona",   "No acepto")
                     if precio is not None:
                         w("precio", precio)

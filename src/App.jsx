@@ -437,6 +437,7 @@ function ImportTab({ onImported, onToast }) {
   }
 
   const removeProduct = (idx) => {
+    if (!confirm('¿Quitar este producto del lote a guardar?')) return
     setResult(prev => ({
       ...prev,
       productos: prev.productos.filter((_, i) => i !== idx),
@@ -713,10 +714,21 @@ function ProductCard({
             </EditRow>
           )}
 
-          {imagenes.length > 0 && (
-            <EditRow label={`Fotos (${imagenes.length})`}>
+          {imagenes.length > 0 && (() => {
+            const tieneVariantId = imagenes.some(img => typeof img === 'object' && img.variant_id)
+            const grupos = tieneVariantId
+              ? [
+                  ...variantes.map(v => ({
+                    label: v.clave || v.codigo || 'Variante',
+                    fotos: imagenes.filter(img => typeof img === 'object' && img.variant_id === v.id),
+                  })),
+                  { label: 'Generales', fotos: imagenes.filter(img => typeof img === 'string' || !img.variant_id) },
+                ].filter(g => g.fotos.length > 0)
+              : [{ label: null, fotos: imagenes }]
+
+            const renderFotos = fotos => (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {imagenes.map((img, i) => {
+                {fotos.map((img, i) => {
                   const url = typeof img === 'string' ? img : img.url
                   return (
                     <a key={i} href={url} target="_blank" rel="noreferrer">
@@ -730,8 +742,25 @@ function ProductCard({
                   )
                 })}
               </div>
-            </EditRow>
-          )}
+            )
+
+            return (
+              <EditRow label={`Fotos (${imagenes.length})`}>
+                {grupos.length > 1 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {grupos.map((g, gi) => (
+                      <div key={gi}>
+                        <p style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-tertiary)', margin: '0 0 4px' }}>
+                          {g.label} ({g.fotos.length})
+                        </p>
+                        {renderFotos(g.fotos)}
+                      </div>
+                    ))}
+                  </div>
+                ) : renderFotos(grupos[0].fotos)}
+              </EditRow>
+            )
+          })()}
 
           {p.titulos_por_variante?.length > 0 && (
             <EditRow label="Títulos sugeridos para MercadoLibre">
@@ -1214,7 +1243,8 @@ function ProductsTab({ onToast }) {
       await api.patch(`/api/products/${draft.id}`, { nombre, descripcion, marca, categoria, subcategoria, seccion, caracteristicas, estado })
       for (const v of (draft.product_variants || [])) {
         const fields = {}
-        for (const k of ['clave', 'codigo', 'descripcion', 'precio_distribuidor', 'nc', 'unidades_caja', 'stock', 'estado'])
+        for (const k of ['clave', 'codigo', 'descripcion', 'precio_distribuidor', 'nc', 'unidades_caja',
+                          'stock', 'stock_ml', 'porcentaje_kobber', 'porcentaje_ml', 'estado'])
           if (v[k] !== undefined) fields[k] = v[k]
         if (Object.keys(fields).length) await api.patch(`/api/products/variants/${v.id}`, fields)
       }
@@ -1235,6 +1265,30 @@ function ProductsTab({ onToast }) {
       setProducts(prev => prev.filter(p => p.id !== id))
       if (editId === id) cancelEdit()
       onToast({ type: 'ok', text: 'Producto eliminado.' })
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    }
+  }
+
+  const [newImageUrl, setNewImageUrl] = useState('')
+
+  const addProductImage = async () => {
+    const url = newImageUrl.trim()
+    if (!url || !draft) return
+    try {
+      const img = await api.post(`/api/products/${draft.id}/images`, { url })
+      setDraft(prev => ({ ...prev, product_images: [...(prev.product_images || []), img] }))
+      setNewImageUrl('')
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    }
+  }
+
+  const removeProductImage = async (imageId) => {
+    if (!confirm('¿Quitar esta foto?')) return
+    try {
+      await api.delete(`/api/products/images/${imageId}`)
+      setDraft(prev => ({ ...prev, product_images: (prev.product_images || []).filter(i => i.id !== imageId) }))
     } catch (e) {
       onToast({ type: 'error', text: e.message })
     }
@@ -1506,9 +1560,7 @@ function ProductsTab({ onToast }) {
                       <EditRow label={`Variantes (${draft.product_variants.length})`}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
                           {draft.product_variants.map(v => {
-                            const vPct   = variantPcts[v.id] ?? null
-                            const vDist  = v.precio_distribuidor ?? null
-                            const vVenta = calcVenta(vDist, vPct)
+                            const vDist = v.precio_distribuidor ?? null
                             return (
                               <div key={v.id} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 12px' }}>
                                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -1524,28 +1576,43 @@ function ProductsTab({ onToast }) {
                                   <EditRow label="Precio dist." style={{ flex: '1 1 80px' }}>
                                     <input type="number" value={vDist ?? ''} onChange={e => setVariantField(v.id, 'precio_distribuidor', e.target.value === '' ? null : Number(e.target.value))} style={variantInputStyle} />
                                   </EditRow>
-                                  <EditRow label="Stock" style={{ flex: '0 1 70px' }}>
+                                  <EditRow label="Stock real" style={{ flex: '0 1 80px' }}>
                                     <input type="number" value={v.stock ?? ''} onChange={e => setVariantField(v.id, 'stock', e.target.value === '' ? null : Number(e.target.value))} style={variantInputStyle} />
                                   </EditRow>
+                                  <EditRow label="Stock ML" style={{ flex: '0 1 80px' }}>
+                                    <input type="number" value={v.stock_ml ?? ''} onChange={e => setVariantField(v.id, 'stock_ml', e.target.value === '' ? null : Number(e.target.value))} style={variantInputStyle} />
+                                  </EditRow>
                                 </div>
-                                {/* Fila de % ganancia por variante */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-                                  <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>% Ganancia:</span>
-                                  <input
-                                    type="number" min={0} max={999}
-                                    value={vPct ?? ''}
-                                    onChange={e => setVariantPct(v.id, e.target.value === '' ? null : Number(e.target.value))}
-                                    style={{ ...variantInputStyle, width: 70, textAlign: 'center' }}
-                                  />
-                                  <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>%</span>
-                                  {vVenta != null && (
-                                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#2E7D52', marginLeft: 4 }}>
-                                      → ${vVenta.toLocaleString()}
-                                    </span>
-                                  )}
-                                  {vDist != null && vPct == null && (
-                                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>ingresa % para ver precio</span>
-                                  )}
+                                {/* % de ganancia — Kobber (tienda) y ML (excel) por separado, persistentes */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>% Kobber:</span>
+                                    <input
+                                      type="number" min={0} max={999}
+                                      value={v.porcentaje_kobber ?? ''}
+                                      onChange={e => setVariantField(v.id, 'porcentaje_kobber', e.target.value === '' ? null : Number(e.target.value))}
+                                      style={{ ...variantInputStyle, width: 70, textAlign: 'center' }}
+                                    />
+                                    {calcVenta(vDist, v.porcentaje_kobber) != null && (
+                                      <span style={{ fontSize: '12px', fontWeight: '600', color: '#2E7D52' }}>
+                                        → ${calcVenta(vDist, v.porcentaje_kobber).toLocaleString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>% ML:</span>
+                                    <input
+                                      type="number" min={0} max={999}
+                                      value={v.porcentaje_ml ?? ''}
+                                      onChange={e => setVariantField(v.id, 'porcentaje_ml', e.target.value === '' ? null : Number(e.target.value))}
+                                      style={{ ...variantInputStyle, width: 70, textAlign: 'center' }}
+                                    />
+                                    {calcVenta(vDist, v.porcentaje_ml) != null && (
+                                      <span style={{ fontSize: '12px', fontWeight: '600', color: '#2E7D52' }}>
+                                        → ${calcVenta(vDist, v.porcentaje_ml).toLocaleString()}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             )
@@ -1553,6 +1620,40 @@ function ProductsTab({ onToast }) {
                         </div>
                       </EditRow>
                     )}
+
+                    <EditRow label={`Fotos (${(draft.product_images || []).length})`}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {(draft.product_images || []).map(img => (
+                            <div key={img.id} style={{ position: 'relative' }}>
+                              <a href={img.url} target="_blank" rel="noreferrer">
+                                <img src={img.url} alt="foto"
+                                  style={{ width: 64, height: 64, objectFit: 'contain', background: '#fff', borderRadius: 6, border: '0.5px solid var(--border)' }}
+                                  onError={e => { e.target.style.display = 'none' }} />
+                              </a>
+                              <button type="button" onClick={() => removeProductImage(img.id)}
+                                title="Quitar foto"
+                                style={{
+                                  position: 'absolute', top: -6, right: -6, width: 18, height: 18,
+                                  borderRadius: '50%', border: 'none', background: 'var(--danger, #C0392B)',
+                                  color: '#fff', fontSize: '11px', lineHeight: '18px', cursor: 'pointer', padding: 0,
+                                }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)}
+                            placeholder="Pega el link de una foto y agrégala"
+                            style={{ ...variantInputStyle, flex: 1 }}
+                          />
+                          <Btn variant="secondary" style={{ padding: '5px 10px', fontSize: '11px' }}
+                            onClick={addProductImage} disabled={!newImageUrl.trim()}>
+                            Agregar
+                          </Btn>
+                        </div>
+                      </div>
+                    </EditRow>
 
                     <div style={{ display: 'flex', gap: 8, paddingTop: 4, alignItems: 'center' }}>
                       <Btn onClick={handleSave} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</Btn>
