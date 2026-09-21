@@ -12,7 +12,8 @@ import openpyxl
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import column_index_from_string
+from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 from config import ANTHROPIC_API_KEY
 from database import get_client
@@ -228,14 +229,61 @@ def _detectar_formato_venta(nombre: str) -> str:
     return "Unidad"
 
 
+def _formatear_hoja(ws, header_row: int, last_data_row: int) -> None:
+    """
+    Limpieza visual final de una hoja ya rellenada:
+    - Oculta las filas entre el header y la fila de ejemplo (8) — son texto de
+      apoyo de ML (si la columna es obligatoria, descripción de la columna),
+      no encabezados ni datos.
+    - Borra la fila de ejemplo (8): ya se usó para sacar `default_vals`, no
+      aporta nada en el archivo final.
+    - Letra tamaño 8 en toda la hoja.
+    - Ancho de columna ajustado al contenido más largo VISIBLE de esa columna
+      (no cuenta filas ocultas — si no, el texto largo de apoyo sigue
+      infriendo el ancho aunque la fila esté oculta).
+    """
+    for row in range(header_row + 1, 8):
+        ws.row_dimensions[row].hidden = True
+
+    ws.delete_rows(8, 1)
+    last_data_row -= 1  # todo lo de acá para abajo también se corrió una fila
+
+    for row in ws.iter_rows(min_row=1, max_row=last_data_row, max_col=ws.max_column):
+        for cell in row:
+            if isinstance(cell, MergedCell):
+                continue
+            f = cell.font
+            cell.font = Font(
+                name=f.name, size=8, bold=f.bold, italic=f.italic, color=f.color,
+            )
+
+    for col_idx in range(1, ws.max_column + 1):
+        max_len = 0
+        for row_idx in range(1, last_data_row + 1):
+            if ws.row_dimensions[row_idx].hidden:
+                continue
+            cell = ws.cell(row_idx, col_idx)
+            if isinstance(cell, MergedCell) or cell.value in (None, ""):
+                continue
+            max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max(max_len + 2, 8), 60)
+
+
 def _ml_col_map(ws) -> dict[str, int]:
     """
     Detecta la fila de encabezados escaneando filas 2-5 y eligiendo
     la que más coincidencias tenga. Soporta templates antiguos (headers
     en fila 4) y nuevos (fila 3).
     """
+    cols, _ = _ml_col_map_with_row(ws)
+    return cols
+
+
+def _ml_col_map_with_row(ws) -> tuple[dict[str, int], int]:
+    """Igual que _ml_col_map pero también devuelve la fila de headers detectada."""
     best_map:  dict[str, int] = {}
     best_hits: int = 0
+    best_row:  int = 4  # fallback razonable si no se detecta nada
 
     for row in range(2, 6):
         col_map: dict[str, int] = {}
@@ -250,8 +298,9 @@ def _ml_col_map(ws) -> dict[str, int]:
         if len(col_map) > best_hits:
             best_hits = len(col_map)
             best_map  = col_map
+            best_row  = row
 
-    return best_map
+    return best_map, best_row
 
 
 _XM_F_RE   = re.compile(r"'([^']+)'!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)")
@@ -1459,8 +1508,8 @@ async def fill_blank_template(
     total_filas = 0
 
     for hoja in hojas:
-        ws   = wb[hoja]
-        cols = _ml_col_map(ws)
+        ws = wb[hoja]
+        cols, header_row = _ml_col_map_with_row(ws)
         if "titulo" not in cols:
             continue
 
@@ -1490,7 +1539,7 @@ async def fill_blank_template(
 
         productos_hoja = cat_to_products.get(hoja, [])
 
-        for p in productos_hoja:
+        for p_idx, p in enumerate(productos_hoja):
             imagenes_producto = p.get("product_images") or []
 
             # Atributos de familia (variant_id = None)
@@ -1535,7 +1584,7 @@ async def fill_blank_template(
                             ws.cell(first_empty, cols[field]).value = val
 
                     w("titulo",           titulo)
-                    w("sku",              codigo)
+                    w("sku",              _coerce_numero(codigo))
                     w("modelo",           clave)
                     w("marca",            p.get("marca", ""))
                     w("descripcion",      p.get("descripcion", ""))
@@ -1552,7 +1601,7 @@ async def fill_blank_template(
                     w("costo_envio",      "A cargo del comprador")
                     w("forma_envio",      "Mercado Envíos")
                     w("garantia_tipo",    "Garantía del vendedor")
-                    w("garantia_tiempo",  "30")
+                    w("garantia_tiempo",  30)
                     w("retiro_persona",   "No acepto")
                     if precio is not None:
                         w("precio", precio)
@@ -1615,9 +1664,14 @@ async def fill_blank_template(
                     "hoja":   hoja,
                 })
 
-                # Fila en blanco separadora entre variantes — vaciarla, la plantilla
-                # trae valores fantasma precargados ahí aunque no haya producto
+            # Fila en blanco separadora ENTRE PRODUCTOS (no entre variantes del
+            # mismo producto) — vaciarla (la plantilla trae valores fantasma
+            # precargados ahí) y resaltarla en amarillo para que se note la
+            # división visualmente.
+            if p_idx < len(productos_hoja) - 1:
                 _limpiar_filas(ws, first_empty, first_empty)
+                for col in range(1, ws.max_column + 1):
+                    ws.cell(first_empty, col).fill = PatternFill("solid", fgColor="FFF9C4")
                 first_empty += 1
 
         # Todo lo que quede después del último producto real de esta hoja también
@@ -1627,6 +1681,8 @@ async def fill_blank_template(
 
         # Inferir atributos vacíos con Claude para todas las filas de esta hoja
         _fill_attrs_claude(ws, rows_for_inference, attr_cols, ai_client, attr_options)
+
+        _formatear_hoja(ws, header_row, first_empty)
 
     import base64 as _b64
     resumen = _b64.b64encode(json.dumps({
