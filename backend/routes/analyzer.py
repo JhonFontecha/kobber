@@ -238,9 +238,10 @@ def _formatear_hoja(ws, header_row: int, last_data_row: int) -> None:
     - Borra la fila de ejemplo (8): ya se usó para sacar `default_vals`, no
       aporta nada en el archivo final.
     - Letra tamaño 8 en toda la hoja.
-    - Ancho de columna ajustado al contenido más largo VISIBLE de esa columna
-      (no cuenta filas ocultas — si no, el texto largo de apoyo sigue
-      infriendo el ancho aunque la fila esté oculta).
+    - Ancho de columna ajustado al contenido de los PRODUCTOS, no al título de
+      la columna — si contara el header (que suele traer una oración larga de
+      ayuda) o las filas ocultas, la columna queda mucho más ancha de lo que
+      necesita el dato real.
     """
     for row in range(header_row + 1, 8):
         ws.row_dimensions[row].hidden = True
@@ -259,7 +260,9 @@ def _formatear_hoja(ws, header_row: int, last_data_row: int) -> None:
 
     for col_idx in range(1, ws.max_column + 1):
         max_len = 0
-        for row_idx in range(1, last_data_row + 1):
+        # Arranca después del header: el ancho lo define el contenido de los
+        # productos, no el texto (largo) de la columna ni las filas ocultas.
+        for row_idx in range(header_row + 1, last_data_row + 1):
             if ws.row_dimensions[row_idx].hidden:
                 continue
             cell = ws.cell(row_idx, col_idx)
@@ -1553,7 +1556,8 @@ async def fill_blank_template(
             # Usar nombre + marca sin clave específica, para que sea igual en todas las variantes
             titulo_generico = f"{p.get('nombre', '')} {p.get('marca', '')}".strip()[:60]
 
-            for v in (p.get("product_variants") or []):
+            variantes_p = p.get("product_variants") or []
+            for v_idx, v in enumerate(variantes_p):
                 clave  = str(v.get("clave") or "").strip()
                 codigo = str(v.get("codigo") or "").strip()
                 precio = v.get("precio_distribuidor")
@@ -1664,14 +1668,18 @@ async def fill_blank_template(
                     "hoja":   hoja,
                 })
 
-            # Fila en blanco separadora ENTRE PRODUCTOS (no entre variantes del
-            # mismo producto) — vaciarla (la plantilla trae valores fantasma
-            # precargados ahí) y resaltarla en amarillo para que se note la
-            # división visualmente.
-            if p_idx < len(productos_hoja) - 1:
+                # Fila en blanco separadora entre CADA variante — vaciarla, la
+                # plantilla trae valores fantasma precargados ahí. Cuando además
+                # es la última variante del producto (frontera con el siguiente
+                # producto) se resalta en amarillo para que la división entre
+                # productos se note a simple vista.
                 _limpiar_filas(ws, first_empty, first_empty)
-                for col in range(1, ws.max_column + 1):
-                    ws.cell(first_empty, col).fill = PatternFill("solid", fgColor="FFF9C4")
+                es_frontera_producto = (
+                    v_idx == len(variantes_p) - 1 and p_idx < len(productos_hoja) - 1
+                )
+                if es_frontera_producto:
+                    for col in range(1, ws.max_column + 1):
+                        ws.cell(first_empty, col).fill = PatternFill("solid", fgColor="FFF9C4")
                 first_empty += 1
 
         # Todo lo que quede después del último producto real de esta hoja también
