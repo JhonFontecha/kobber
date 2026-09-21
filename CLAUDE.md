@@ -245,6 +245,8 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
 - **Ortografía de marca**: la marca se escribe `"Truper"` (una sola P) — no `"Trupper"`. Aparece así en prompts (extracción, enhance), exports de Excel y el dominio de imágenes (`truper.com`). El PDF fuente puede tener la marca mal escrita o ambigua; el prompt de extracción exige copiar la marca EXACTAMENTE como aparece impresa en cada página, sin asumir ni heredar de otra página.
 - **Cuotas**: el campo "Cuotas" en las plantillas/exports ML siempre se llena con `"Cuotas extra"`, nunca `"Cuotas"` a secas — regla de negocio fija, no queda a criterio de Claude (`analyzer.py` → `fill_blank_template`, `excel.py` → `generate_ml_excel`).
 - **Pulgadas**: el número va pegado al símbolo `"`, sin espacio (`9"`, `8"`, `3"`, `1/2"` — nunca `9 "`). Aplica en cualquier punto donde Claude genera o normaliza texto de producto: `catalog.py` → `EXTRACTION_PROMPT` (nombre/descripción al capturar del catálogo) y `ENHANCE_PROMPT` (descripción y títulos sugeridos).
+- **Columnas numéricas de ML**: SKU y tiempo de garantía deben ir como celda numérica real (`int`), no texto — ML puede rechazar la fila si esperaba número y llegó string. Usar `_coerce_numero` (`analyzer.py`) al escribirlas, igual que ya se hace con atributos dinámicos.
+- **Formato visual del Excel de ML** (`analyzer.py` → `_formatear_hoja`, corre al final de cada hoja en `fill_blank_template`): oculta las filas de apoyo de ML entre el header y la fila de ejemplo (que además se borra), letra tamaño 8, columnas autoajustadas al contenido visible. Entre productos distintos de la misma hoja va una fila en blanco resaltada en amarillo — nunca entre variantes de un mismo producto.
 
 ## Problemas conocidos / deuda técnica
 
