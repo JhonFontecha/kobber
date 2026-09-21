@@ -238,10 +238,10 @@ def _formatear_hoja(ws, header_row: int, last_data_row: int) -> None:
     - Borra la fila de ejemplo (8): ya se usó para sacar `default_vals`, no
       aporta nada en el archivo final.
     - Letra tamaño 8 en toda la hoja.
-    - Ancho de columna ajustado al contenido de los PRODUCTOS, no al título de
-      la columna — si contara el header (que suele traer una oración larga de
-      ayuda) o las filas ocultas, la columna queda mucho más ancha de lo que
-      necesita el dato real.
+    - Columnas A y B fijas (freeze panes) para que queden siempre visibles al
+      desplazarse hacia la derecha; su ancho se sigue ajustando al contenido
+      de los productos. El resto de columnas van a ancho fijo 10, con el
+      texto ajustado (wrap) para que no se corte.
     """
     for row in range(header_row + 1, 8):
         ws.row_dimensions[row].hidden = True
@@ -258,18 +258,33 @@ def _formatear_hoja(ws, header_row: int, last_data_row: int) -> None:
                 name=f.name, size=8, bold=f.bold, italic=f.italic, color=f.color,
             )
 
+    ws.freeze_panes = "C1"  # A y B siempre visibles al desplazarse a la derecha
+
     for col_idx in range(1, ws.max_column + 1):
-        max_len = 0
-        # Arranca después del header: el ancho lo define el contenido de los
-        # productos, no el texto (largo) de la columna ni las filas ocultas.
-        for row_idx in range(header_row + 1, last_data_row + 1):
-            if ws.row_dimensions[row_idx].hidden:
-                continue
+        col_letter = get_column_letter(col_idx)
+
+        if col_idx <= 2:  # A, B: ancho ajustado al contenido de los productos
+            max_len = 0
+            for row_idx in range(header_row + 1, last_data_row + 1):
+                if ws.row_dimensions[row_idx].hidden:
+                    continue
+                cell = ws.cell(row_idx, col_idx)
+                if isinstance(cell, MergedCell) or cell.value in (None, ""):
+                    continue
+                max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max(max_len + 2, 8), 60)
+            continue
+
+        # Resto de columnas: ancho fijo 10, con el texto ajustado para que no
+        # se corte con un ancho tan angosto.
+        ws.column_dimensions[col_letter].width = 10
+        for row_idx in range(1, last_data_row + 1):
             cell = ws.cell(row_idx, col_idx)
-            if isinstance(cell, MergedCell) or cell.value in (None, ""):
+            if isinstance(cell, MergedCell):
                 continue
-            max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max(max_len + 2, 8), 60)
+            cell.alignment = Alignment(
+                wrap_text=True, vertical="center", horizontal=cell.alignment.horizontal,
+            )
 
 
 def _ml_col_map(ws) -> dict[str, int]:
