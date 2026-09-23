@@ -43,16 +43,18 @@ npm install
 
 ### 3. Sesión de MercadoLibre (para publicar/renovar plantillas)
 
-`playwright` ya se instaló con `requirements.txt` — sólo falta crear la sesión guardada corriendo
-esto una vez (abre un Chrome real para que te loguees a mano):
+`playwright` ya se instaló con `requirements.txt` — sólo falta crear la sesión guardada, con
+cualquiera de estas dos opciones (misma sesión, mismo perfil de Chrome):
 
-```bash
-backend/venv/bin/python3 scripts/ml_login.py
-```
+- **Desde el panel admin** (sin terminal): paso 2 del publicador → botón "🔑 Iniciar sesión ML"
+  (aparece cuando "↻ Verificar" muestra sin sesión). Abre una pestaña en el Chrome de Kobber para
+  loguearte a mano.
+- **Por terminal** (abre un Chrome real para que te loguees a mano):
+  ```bash
+  backend/venv/bin/python3 scripts/ml_login.py
+  ```
 
-La sesión expira cada tanto — cuando eso pase, correr el mismo comando de nuevo. El publicador
-(paso 2 del panel admin) tiene un botón "↻ Verificar" para chequear si sigue activa, pero renovarla
-se hace siempre por terminal con este comando — no hay botón que dispare el login desde el backend.
+La sesión expira cada tanto — cuando eso pase, repetir cualquiera de las dos opciones.
 
 ## Correr en desarrollo
 

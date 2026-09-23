@@ -29,15 +29,15 @@ los scripts `ml_*.py` — sobre todo en una máquina donde no se corrió antes.
 1. Confirmar que Google Chrome está instalado (`/Applications/Google Chrome.app`
    o `~/Applications/Google Chrome.app` — son las únicas rutas que
    `ml_chrome.py` busca). Si no está, instalarlo desde google.com/chrome.
-2. Correr `backend/venv/bin/python3 scripts/ml_login.py` — abre una ventana de
-   Chrome real; loguearse en ML a mano y esperar a llegar a la página de
-   categorías, luego Enter en la terminal.
+2. Loguearse en ML de una de estas dos formas (misma sesión, mismo perfil):
+   - **Desde el panel** (sin terminal): paso 2 del publicador, botón
+     "🔑 Iniciar sesión ML" — sale solo cuando "↻ Verificar" muestra sin
+     sesión. Llama a `POST /api/analyzer/ml-login`, que asegura el Chrome de
+     Kobber y abre una pestaña ahí para loguearse a mano.
+   - **Por terminal**: `backend/venv/bin/python3 scripts/ml_login.py` — mismo
+     efecto, útil si el backend no está corriendo o para debug.
 3. Verificar en el publicador (paso 2, botón "↻ Verificar") que muestre sesión
    activa.
-
-No existe (ni debe agregarse) un botón en el panel que dispare el login desde
-el backend — se decidió a propósito que renovar sesión es siempre por
-terminal (ver `[[ml-publisher-flow]]` en la memoria del proyecto).
 
 ## Checklist quick-diagnóstico
 

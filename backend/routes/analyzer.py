@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import zipfile
 from collections import defaultdict
 from typing import Optional
@@ -17,6 +18,10 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 
 from config import ANTHROPIC_API_KEY
 from database import get_client
+
+# scripts/ vive fuera de backend/, no está en sys.path por defecto
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../scripts"))
+from ml_chrome import ensure_kobber_chrome  # noqa: E402
 
 router = APIRouter()
 
@@ -1241,8 +1246,44 @@ async def ml_session_status():
     return await check()
 
 
-# Renovar la sesión se hace por terminal con `python3 scripts/ml_login.py`
-# (abre el mismo perfil persistente que revisa /ml-session-status arriba).
+@router.post("/ml-login")
+async def ml_login():
+    """
+    Asegura que el Chrome del perfil de Kobber esté corriendo (lo lanza si
+    hace falta) y abre una pestaña ahí para que el usuario se loguee a mano —
+    equivalente a scripts/ml_login.py pero disparado desde el panel, sin
+    terminal. Bloquea hasta 3 minutos esperando a que se llegue a la página
+    de categorías.
+    """
+    import asyncio
+    from playwright.async_api import async_playwright
+
+    ML_URL = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
+
+    try:
+        await asyncio.to_thread(ensure_kobber_chrome)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+    async with async_playwright() as p:
+        try:
+            browser = await p.chromium.connect_over_cdp(ML_KOBBER_CDP_URL)
+        except Exception as e:
+            raise HTTPException(500, f"No se pudo conectar al Chrome de Kobber: {e}")
+
+        ctx  = browser.contexts[0] if browser.contexts else await browser.new_context()
+        page = await ctx.new_page()
+        try:
+            await page.goto(ML_URL)
+            await page.wait_for_url("**/publicar-masivamente/categories**", timeout=180_000)
+            return {"ok": True, "message": "Sesión guardada correctamente"}
+        except Exception as e:
+            raise HTTPException(504, f"No se completó el login a tiempo: {e}")
+        finally:
+            await page.close()  # solo la pestaña — la ventana queda abierta
+
+
+# Alternativa por terminal: `python3 scripts/ml_login.py` (misma sesión).
 
 
 # ── Inferencia de atributos faltantes con Claude ──────────────────────────────

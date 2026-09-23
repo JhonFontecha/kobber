@@ -2052,6 +2052,7 @@ function FlowTab({ onToast }) {
   const [downloading,   setDownloading]   = useState(false)
   const [mlSession,     setMlSession]     = useState(null) // null=checking, true=active, false=expired
   const [categorySummary, setCategorySummary] = useState(null) // [{producto, categoria_sugerida, categoria_agregada}]
+  const [mlLogging,     setMlLogging]     = useState(false)
 
   const checkMlSession = async () => {
     setMlSession(null)
@@ -2060,6 +2061,20 @@ function FlowTab({ onToast }) {
       setMlSession(data.active)
     } catch {
       setMlSession(false)
+    }
+  }
+
+  const handleMlLogin = async () => {
+    setMlLogging(true)
+    onToast({ type: 'ok', text: 'Se está abriendo (o reutilizando) el Chrome de Kobber — inicia sesión ahí en la pestaña nueva.' })
+    try {
+      await api.post('/api/analyzer/ml-login', {})
+      onToast({ type: 'ok', text: '✅ Sesión guardada. Verificando...' })
+      await checkMlSession()
+    } catch (e) {
+      onToast({ type: 'error', text: e.message })
+    } finally {
+      setMlLogging(false)
     }
   }
 
@@ -2491,16 +2506,22 @@ function FlowTab({ onToast }) {
                   ? 'Verificando sesión de MercadoLibre...'
                   : mlSession
                     ? 'Sesión activa — puedes descargar plantillas'
-                    : 'Sin sesión del scraper — corre "python3 scripts/ml_login.py" desde la terminal para renovarla'}
+                    : 'Sin sesión — dale a "Iniciar sesión ML" para loguearte sin terminal'}
               </span>
-              <Btn variant="ghost" onClick={checkMlSession}
+              {mlSession === false && (
+                <Btn variant="secondary" onClick={handleMlLogin} disabled={mlLogging}
+                  style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
+                  {mlLogging ? 'Esperando login...' : '🔑 Iniciar sesión ML'}
+                </Btn>
+              )}
+              <Btn variant="ghost" onClick={checkMlSession} disabled={mlLogging}
                 style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}>
                 {mlSession === null ? '...' : '↻ Verificar'}
               </Btn>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Btn onClick={handleDownloadTemplate} disabled={downloading || mlSession === false}>
+              <Btn onClick={handleDownloadTemplate} disabled={downloading || mlLogging || mlSession === false}>
                 {downloading ? 'Agregando categorías... (1-2 min)' : '🔍 Agregar categorías en ML'}
               </Btn>
               {categoriasListas && (
