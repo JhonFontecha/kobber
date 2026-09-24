@@ -58,6 +58,19 @@ La sesión expira cada tanto — cuando eso pase, repetir cualquiera de las dos 
 
 ## Correr en desarrollo
 
+### Windows — inicio con doble clic
+
+Después de clonar o copiar el proyecto, haz doble clic en **`Iniciar Kobber.bat`**. El iniciador:
+
+- comprueba Node.js, npm y Python;
+- instala las dependencias que falten;
+- crea y valida `backend/.env` sin mostrar las credenciales;
+- inicia backend y frontend sin duplicar procesos;
+- verifica la conexión con Supabase;
+- abre el panel administrativo en `http://127.0.0.1:5173/admin`.
+
+Las ventanas del backend y frontend deben permanecer abiertas mientras se usa Kobber.
+
 **Opción rápida (sin terminal):** doble clic en `Iniciar Kobber.command` en la raíz del repo —
 levanta backend y frontend, abre el navegador solo, y se apaga cerrando la ventana o con Ctrl+C.
 Requiere haber hecho la instalación de arriba al menos una vez.
