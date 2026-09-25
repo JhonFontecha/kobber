@@ -36,7 +36,10 @@ class PortabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {"KOBBER_DATA_DIR": folder}):
             for name in ("../../secret", "CON", 'ml_Café/:*?<>|_resultados.png'):
                 path = runtime_file(name)
-                self.assertEqual(path.parent, Path(folder))
+                # Windows runners may expose the temp directory through an 8.3
+                # alias and macOS maps /var to /private/var. Compare canonical
+                # paths instead of their platform-dependent spelling.
+                self.assertEqual(path.parent.resolve(), Path(folder).resolve())
                 self.assertNotIn("/", path.name)
                 self.assertNotIn(":", path.name)
                 self.assertNotEqual(path.name, "CON")
