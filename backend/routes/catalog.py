@@ -18,14 +18,14 @@ from PIL import Image
 
 from config import ANTHROPIC_API_KEY
 from database import get_client
+from uploads import read_upload
+from tls import verified_context
 
 router = APIRouter()
 
 # ── Categorización ML ──────────────────────────────────────────────────────────
 
-_ssl_ctx = ssl.create_default_context()
-_ssl_ctx.check_hostname = False
-_ssl_ctx.verify_mode    = ssl.CERT_NONE
+_ssl_ctx = verified_context()
 
 # Overrides manuales para productos que la API clasifica mal
 _ML_CATEGORY_OVERRIDES: dict[str, str] = {
@@ -752,7 +752,7 @@ async def extract_catalog(file: UploadFile = File(...)):
     if not is_image and not is_pdf:
         raise HTTPException(status_code=400, detail="Se aceptan PDF, JPG, PNG o WEBP")
 
-    file_bytes = await file.read()
+    file_bytes = await read_upload(file)
 
     # ── Flujo imagen ──────────────────────────────────────────────────────────
     if is_image:

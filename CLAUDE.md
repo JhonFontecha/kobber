@@ -32,14 +32,14 @@ Dos servidores en simultáneo:
 
 ```bash
 # Backend (FastAPI) — desde la raíz del repo
-backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir backend
+backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --reload --app-dir backend
 
 # Frontend (Vite + React) — desde la raíz del repo
 npm run dev
 ```
 
 Frontend en http://localhost:5173 (tienda pública en `/`, panel admin en `/admin`) — todas las llamadas
-`/api/*` se proxean a `http://localhost:8000` (ver `vite.config.js`).
+`/api/*` se proxean a `http://127.0.0.1:8000` (ver `vite.config.js`).
 
 Backend health check: `GET /health` → `{"status": "ok"}`. Al arrancar imprime en consola si está usando
 la `service_role` key de Supabase o la `anon` (con RLS activo) — revisar esto si algo falla con permisos.
@@ -201,7 +201,7 @@ máquina donde el flujo no se corrió antes).
 
 Scripts Playwright que automatizan la carga masiva de ML (corren fuera del backend, invocados manualmente o desde `POST /api/analyzer/download-template`):
 
-1. `ml_chrome.py` — lanza (o reutiliza) un Chrome real, con perfil propio de Kobber en `/tmp/ml_chrome_profile`, como proceso del sistema operativo (`subprocess.Popen`, no `playwright.launch`) escuchando CDP en el puerto 9223. Se lanza aparte porque Playwright mata cualquier browser que él mismo lanza en cuanto su conexión se cierra — así la misma ventana sobrevive entre corridas de los scripts de abajo. Chrome real (no el Chromium de pruebas) porque ML bloquea ese último como navegador automatizado ("Alcanzaste el límite de intentos"). No se puede usar el Chrome normal del usuario: bloquea `--remote-debugging-port` en su perfil por defecto (protección anti-secuestro de sesión vía CDP).
+1. `ml_chrome.py` — lanza (o reutiliza) un Chrome real, con perfil propio de Kobber en la carpeta de datos locales del usuario (`AppData/Local/KobberChromeProfile` en Windows, `Library/Application Support/KobberChromeProfile` en macOS o `.local/share/KobberChromeProfile` en Linux), como proceso del sistema operativo (`subprocess.Popen`, no `playwright.launch`) escuchando CDP en el puerto 9223. Se lanza aparte porque Playwright mata cualquier browser que él mismo lanza en cuanto su conexión se cierra — así la misma ventana sobrevive entre corridas de los scripts de abajo. Chrome real (no el Chromium de pruebas) porque ML bloquea ese último como navegador automatizado ("Alcanzaste el límite de intentos"). No se puede usar el Chrome normal del usuario: bloquea `--remote-debugging-port` en su perfil por defecto (protección anti-secuestro de sesión vía CDP).
 2. `ml_login.py` — se conecta por CDP a ese Chrome (vía `ensure_kobber_chrome()`) y abre una pestaña para loguearse en ML a mano; la sesión queda en el perfil persistente, no en un archivo.
 3. `ml_scrape_template.py` — se conecta al mismo Chrome, identifica categorías vía `domain_discovery` y las agrega en la página de publicación masiva. El matching de categoría exige coincidencia EXACTA de línea contra `domain_name`/`category_name` antes de caer a un respaldo por substring (que descarta rubros ajenos a ferretería vía `TOP_LEVEL_EXCLUIDOS` — ver "Problemas conocidos"). Tiene `CATEGORY_OVERRIDES` y `SIN_CATEGORIA_ML` hardcodeados para casos donde la clasificación automática de ML falla. **No descarga el archivo**: deja la pestaña abierta para que el usuario revise/corrija la categoría a mano y descargue él mismo — la elección de ML no siempre es la correcta.
 4. `ml_inspect.py` — utilidad de debug para inspeccionar selectores de la página de ML
@@ -251,13 +251,13 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
 ## Problemas conocidos / deuda técnica
 
 - Login de tienda (`LoginPage.jsx`) no es autenticación real — credenciales hardcodeadas en el frontend, visibles en el bundle. No usar para proteger nada sensible sin reemplazarlo primero.
-- `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
+- Pillow está fijado a 12.3.0 con soporte para Python 3.14; no se debe omitir su instalación.
 - `playwright` está en `requirements.txt`. En macOS 13 (Ventura) `playwright install chromium` **falla** —
   Playwright dejó de dar soporte a Chromium en ese OS — así que en todo el proyecto se usa el Google
   Chrome real del sistema en vez del binario propio de Playwright: `ml_inspect.py` con
-  `chromium.launch(..., channel="chrome")`, y `ml_login.py`/`ml_scrape_template.py` conectándose por
+  `connect_over_cdp()` al perfil de Kobber, y `ml_login.py`/`ml_scrape_template.py` conectándose por
   CDP al Chrome que lanza `ml_chrome.py` (que sí invoca el binario de Chrome directo, no vía
-  Playwright — ver arriba). Requiere tener Chrome instalado en `/Applications/Google Chrome.app`
+  Playwright — ver arriba). Requiere Chrome instalado en una ubicación reconocida por el sistema o CHROME_EXECUTABLE configurado
   — si no está, instalarlo desde google.com/chrome, no correr `playwright install`.
 - Matching de categoría en `ml_scrape_template.py`: el buscador de categorías de ML puede devolver
   una categoría de otro rubro que contiene el término buscado como substring (ej. "aceiteras" →
@@ -275,3 +275,13 @@ Supabase se cargan en el dashboard de Render, nunca en `render.yaml` ni en git.
   empaque no contemplados antes (`+E{n}` = tarjeta/blister, `+EM{n}` = caja máster, además de
   `+EI{n}`/`+EIND{n}` que ya se excluían) — filtrados en `_is_product_photo`. El método viejo de
   adivinar (`_build_candidates`) queda solo como respaldo si el buscador no encuentra la clave.
+
+## Compatibilidad y seguridad — revisión 2026-09-25
+
+El inicio común es `scripts/start.py`; los únicos lanzadores de escritorio viven en
+`deployment/windows` y `deployment/macos`.
+Las rutas de runtime provienen de backend/runtime_paths.py, relativas a la raíz del repositorio.
+En Windows el intérprete local es backend/venv/Scripts/python.exe; en macOS/Linux backend/venv/bin/python.
+Los subprocesos del backend utilizan sys.executable y UTF-8. Para las instrucciones vigentes de instalación,
+consulta README.md. La API administrativa es exclusivamente local; /health/db comprueba una lectura real.
+Las sesiones antiguas de `/tmp` o `.kobber/chrome-profile` no se migran: inicia sesión en el perfil local del usuario.

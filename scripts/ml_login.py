@@ -14,6 +14,7 @@ Corre con:  python3 scripts/ml_login.py
 """
 from playwright.sync_api import sync_playwright
 from ml_chrome import ensure_kobber_chrome, KOBBER_CDP_URL
+from runtime_paths import runtime_file
 
 try:
     ensure_kobber_chrome()
@@ -36,7 +37,7 @@ with sync_playwright() as p:
     print("=================================================\n")
     input("Presiona Enter cuando estés listo...")
 
-    page.screenshot(path="/tmp/ml_categories_login.png")
+    page.screenshot(path=str(runtime_file("ml_categories_login.png")))
 
     print(f"\nURL actual: {page.url}")
     print(f"Título: {page.title()}")

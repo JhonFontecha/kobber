@@ -1,13 +1,15 @@
 """Inspecciona la página de ML para encontrar los selectores correctos."""
 import time
 from playwright.sync_api import sync_playwright
+from ml_chrome import ensure_kobber_chrome, KOBBER_CDP_URL
+from runtime_paths import runtime_file
 
-SESSION_FILE = "/tmp/ml_session.json"
 URL = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False, slow_mo=100, channel="chrome")
-    ctx  = browser.new_context(storage_state=SESSION_FILE)
+    ensure_kobber_chrome()
+    browser = p.chromium.connect_over_cdp(KOBBER_CDP_URL)
+    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
     page = ctx.new_page()
 
     page.goto(URL)
@@ -36,7 +38,7 @@ with sync_playwright() as p:
         except:
             pass
 
-    page.screenshot(path="/tmp/ml_inspect.png")
-    print("\nScreenshot: /tmp/ml_inspect.png")
+    page.screenshot(path=str(runtime_file("ml_inspect.png")))
+    print(f"\nScreenshot: {runtime_file('ml_inspect.png')}")
     input("\nPresiona Enter para cerrar...")
-    browser.close()
+    page.close()

@@ -8,7 +8,9 @@ los scripts `ml_*.py` — sobre todo en una máquina donde no se corrió antes.
 
 - `scripts/ml_chrome.py::ensure_kobber_chrome()` lanza Google Chrome real como
   **proceso del sistema operativo** (no vía Playwright) con un perfil propio en
-  `/tmp/ml_chrome_profile` y depuración remota en `http://localhost:9223`.
+  los datos locales del usuario (`AppData/Local/KobberChromeProfile` en Windows,
+  `Library/Application Support/KobberChromeProfile` en macOS o `.local/share/KobberChromeProfile` en
+  Linux) y depuración remota en `http://127.0.0.1:9223`.
 - Se lanza aparte de Playwright a propósito: Playwright mata cualquier browser
   que él mismo lanza en cuanto su conexión se cierra, así que si lo lanzáramos
   con `playwright.launch()` no sobreviviría entre corridas de `ml_login.py` y
@@ -16,19 +18,17 @@ los scripts `ml_*.py` — sobre todo en una máquina donde no se corrió antes.
   se reutiliza — cada script solo se conecta por CDP y abre una pestaña nueva.
 - No se puede usar el Chrome normal del usuario: Chrome bloquea
   `--remote-debugging-port` en el perfil por defecto (protección contra
-  secuestro de sesión vía CDP). Por eso el perfil de `/tmp/ml_chrome_profile`
+  secuestro de sesión vía CDP). Por eso el perfil de Kobber
   es propio de Kobber, separado del Chrome de uso diario.
 - Se usa Chrome real (no el Chromium de pruebas que trae Playwright) porque ML
   detecta ese Chromium como navegador automatizado y bloquea el login
   ("Alcanzaste el límite de intentos").
-- Toda esta infraestructura es **local a cada máquina** — `/tmp/ml_chrome_profile`
+- Toda esta infraestructura es **local a cada máquina** — el perfil de Chrome
   y la sesión de ML que contiene no se comparten entre Macs ni se suben a git.
 
 ## Primera vez en una máquina nueva
 
-1. Confirmar que Google Chrome está instalado (`/Applications/Google Chrome.app`
-   o `~/Applications/Google Chrome.app` — son las únicas rutas que
-   `ml_chrome.py` busca). Si no está, instalarlo desde google.com/chrome.
+1. Confirmar Google Chrome instalado. Se busca en Program Files/LocalAppData (Windows), Applications (macOS) o PATH (Linux). Para otra ubicación, configura CHROME_EXECUTABLE en backend/.env.
 2. Loguearse en ML de una de estas dos formas (misma sesión, mismo perfil):
    - **Desde el panel** (sin terminal): paso 2 del publicador, botón
      "🔑 Iniciar sesión ML" — sale solo cuando "↻ Verificar" muestra sin
@@ -49,7 +49,7 @@ los scripts `ml_*.py` — sobre todo en una máquina donde no se corrió antes.
 
 **`ml_login.py` o el scraper truena con "No se encontró Google Chrome instalado":**
 - Chrome no está en ninguna de las rutas que `ml_chrome.py::_CHROME_BIN_CANDIDATES`
-  conoce. Instalarlo, o si está en una ruta no estándar, agregarla a esa lista.
+  conoce. Instalarlo, o si está en una ruta no estándar, configurar CHROME_EXECUTABLE en backend/.env.
 
 **El scraper agrega la categoría equivocada (ej. una de cocina/hogar para un producto de ferretería):**
 - Ver `TOP_LEVEL_EXCLUIDOS` y el orden de matching (`domain_name` antes que
@@ -66,3 +66,13 @@ los scripts `ml_*.py` — sobre todo en una máquina donde no se corrió antes.
 "Problemas conocidos" en `CLAUDE.md` — documentan restricciones ya
 confirmadas empíricamente (bloqueo de CDP en perfil default, Playwright
 matando su propio browser) para no volver a intentarlas.
+
+## Compatibilidad y seguridad — revisión 2026-09-25
+
+El inicio común es `scripts/start.py`; los únicos lanzadores de escritorio viven en
+`deployment/windows` y `deployment/macos`.
+Las rutas de runtime provienen de backend/runtime_paths.py, relativas a la raíz del repositorio.
+En Windows el intérprete local es backend/venv/Scripts/python.exe; en macOS/Linux backend/venv/bin/python.
+Los subprocesos del backend utilizan sys.executable y UTF-8. Para las instrucciones vigentes de instalación,
+consulta README.md. La API administrativa es exclusivamente local; /health/db comprueba una lectura real.
+Las sesiones antiguas de /tmp o `.kobber/chrome-profile` no se migran: inicia sesión en el perfil local del usuario.

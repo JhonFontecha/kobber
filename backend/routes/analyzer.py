@@ -5,6 +5,8 @@ import re
 import subprocess
 import sys
 import zipfile
+import asyncio
+import tempfile
 from collections import defaultdict
 from typing import Optional
 
@@ -18,10 +20,12 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 
 from config import ANTHROPIC_API_KEY
 from database import get_client
+from uploads import read_upload
+from runtime_paths import SCRIPTS_DIR, runtime_file
 
 # scripts/ vive fuera de backend/, no está en sys.path por defecto
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../scripts"))
-from ml_chrome import ensure_kobber_chrome  # noqa: E402
+sys.path.insert(0, str(SCRIPTS_DIR))
+from ml_chrome import ensure_kobber_chrome, KOBBER_CDP_URL  # noqa: E402
 
 router = APIRouter()
 
@@ -460,8 +464,8 @@ async def compare(
     kobber_file: UploadFile = File(...),
     ml_file:     UploadFile = File(...),
 ):
-    kobber_bytes = await kobber_file.read()
-    ml_bytes     = await ml_file.read()
+    kobber_bytes = await read_upload(kobber_file)
+    ml_bytes     = await read_upload(ml_file)
 
     try:
         kobber_index = _parse_kobber_file(kobber_bytes)
@@ -658,7 +662,7 @@ async def generate_variations(ml_file: UploadFile = File(...)):
     Recibe el archivo ML, genera 3 variaciones de título por fila usando Claude
     y devuelve un Excel con 3× las filas listas para subir a ML.
     """
-    ml_bytes = await ml_file.read()
+    ml_bytes = await read_upload(ml_file)
     try:
         ml_rows = _parse_ml_file(ml_bytes)
     except Exception as e:
@@ -763,8 +767,8 @@ async def full_report(
     from datetime import datetime
     from io import BytesIO
 
-    kobber_bytes = await kobber_file.read()
-    ml_bytes     = await ml_file.read()
+    kobber_bytes = await read_upload(kobber_file)
+    ml_bytes     = await read_upload(ml_file)
 
     # ── Parsear archivos ───────────────────────────────────────────────────────
     try:
@@ -1014,7 +1018,7 @@ async def generate_from_ml(
     from datetime import datetime
     from io import BytesIO
 
-    ml_bytes = await ml_file.read()
+    ml_bytes = await read_upload(ml_file)
 
     # Cargar el workbook preservando formato para modificarlo y devolverlo
     try:
@@ -1132,6 +1136,14 @@ async def generate_from_ml(
 
 @router.post("/download-template")
 async def download_template(body: dict):
+    async with _scraper_lock:
+        return await _download_template(body)
+
+
+_scraper_lock = asyncio.Lock()
+
+
+async def _download_template(body: dict):
     """
     Recibe una lista de product_ids, obtiene sus categorías ML de la BD y
     ejecuta el scraper para AGREGAR esas categorías en la planilla de ML.
@@ -1154,28 +1166,29 @@ async def download_template(body: dict):
     if not con_categoria:
         raise HTTPException(400, "Los productos seleccionados no tienen categoria_ml asignada")
 
-    nombres_file = "/tmp/ml_productos_seleccionados.txt"
-    with open(nombres_file, "w") as f:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".txt", prefix="ml-products-", dir=runtime_file("unused").parent, delete=False) as f:
+        nombres_file = f.name
         f.write("\n".join(f'{p["categoria_ml"]}\t{p["nombre"]}' for p in con_categoria))
 
     # Ejecutar el scraper como subprocess
-    script = os.path.join(os.path.dirname(__file__), "../../scripts/ml_scrape_template.py")
-    script = os.path.abspath(script)
-    venv_python = os.path.join(os.path.dirname(__file__), "../../backend/venv/bin/python3")
-    venv_python = os.path.abspath(venv_python)
+    script = SCRIPTS_DIR / "ml_scrape_template.py"
+    venv_python = sys.executable
 
     try:
-        result = subprocess.run(
+        result = await asyncio.to_thread(subprocess.run,
             [venv_python, script, "--file", nombres_file],
             # ML a veces pide una verificación de seguridad manual en la
             # ventana del scraper antes de continuar (ver ml_scrape_template.py)
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
             cwd=os.path.dirname(script),
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "El scraper tardó demasiado. Reintenta.")
     except Exception as e:
         raise HTTPException(500, f"Error ejecutando scraper: {e}")
+    finally:
+        os.unlink(nombres_file)
 
     if result.returncode != 0:
         raise HTTPException(500, f"Error en el scraper:\n{result.stderr[-500:]}")
@@ -1184,10 +1197,10 @@ async def download_template(body: dict):
     # antes de descargar, así que categoria_ml se sincroniza de verdad en
     # fill-blank-template, con el archivo que efectivamente se sube.
     resumen = []
-    plan_path = "/tmp/ml_category_plan.json"
+    plan_path = runtime_file("ml_category_plan.json")
     if os.path.exists(plan_path):
         try:
-            with open(plan_path) as f:
+            with open(plan_path, encoding="utf-8") as f:
                 plan = json.load(f)
             for item in plan:
                 resumen.append({
@@ -1213,7 +1226,7 @@ async def download_template(body: dict):
 # perfil PROPIO de Kobber lanzado aparte (scripts/ml_chrome.py) y solo nos
 # conectamos por CDP — nunca lo lanzamos desde acá. Login con ml_login.py.
 
-ML_KOBBER_CDP_URL = "http://localhost:9223"
+ML_KOBBER_CDP_URL = KOBBER_CDP_URL
 
 
 @router.get("/ml-session-status")
@@ -1423,7 +1436,7 @@ async def fill_blank_template(
     from datetime import datetime
     from io import BytesIO
 
-    ml_bytes = await ml_file.read()
+    ml_bytes = await read_upload(ml_file)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(ml_bytes))
     except Exception as e:
@@ -1458,10 +1471,10 @@ async def fill_blank_template(
     # usuario efectivamente descargó y subió acá — la categoría que el
     # scraper agregó (o la que el usuario corrigió a mano en ML antes de
     # descargar) puede diferir de lo que ya había guardado en la BD.
-    plan_path = "/tmp/ml_category_plan.json"
+    plan_path = runtime_file("ml_category_plan.json")
     if os.path.exists(plan_path):
         try:
-            with open(plan_path) as f:
+            with open(plan_path, encoding="utf-8") as f:
                 plan = json.load(f)
             nombres_plan = [item["producto"] for item in plan if item.get("producto")]
             por_nombre = {
