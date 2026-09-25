@@ -26,8 +26,8 @@ if exist "%TARGET%" (
 )
 
 if not exist "%USERPROFILE%\Documents\Proyectos" mkdir "%USERPROFILE%\Documents\Proyectos"
-echo Descargando Kobber desde la rama main...
-git clone --branch main --single-branch "%REPO_URL%" "%TARGET%" || goto :failed
+echo Descargando Kobber desde la rama ajustes_kobber_J...
+git clone --branch ajustes_kobber_J --single-branch "%REPO_URL%" "%TARGET%" || goto :failed
 goto :configure
 
 :existing
