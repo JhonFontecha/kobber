@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from local_security import LocalOnlyMiddleware
 
 from config import init_storage
 from routes import analyzer, catalog, excel, images, products, store
 
 app = FastAPI(title="Kobber API", version="0.2.0")
+app.add_middleware(LocalOnlyMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +34,18 @@ def startup():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "kobber-admin"}
+
+
+@app.get("/health/db")
+def database_health():
+    from database import get_client
+    from fastapi.responses import JSONResponse
+    try:
+        get_client().table("products").select("id").limit(1).execute()
+        return {"status": "ok", "database": "supabase"}
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Verifica Supabase, la red y backend/.env."}, status_code=503)
 
 
 app.include_router(catalog.router,   prefix="/api/catalog",   tags=["catalog"])

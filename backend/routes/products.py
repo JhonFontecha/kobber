@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import get_client
+from uploads import read_upload
 from routes.catalog import enhance_product_data_safe, get_ml_category, _truncar_titulos
 
 router = APIRouter()
@@ -138,7 +139,7 @@ def search_by_codes(body: CodesSearch):
 
 @router.post("/from-excel")
 async def search_from_excel(file: UploadFile = File(...)):
-    content = await file.read()
+    content = await read_upload(file)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     except Exception:

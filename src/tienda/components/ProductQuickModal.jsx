@@ -1,3 +1,4 @@
+import { productTitle, productSummary } from '../utils/productPresentation.mjs'
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { X, ShoppingCart, Star, Package, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -7,6 +8,8 @@ import { fetchProductoDetalle } from '../hooks/useStoreProducts'
 const fmt = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 
 export default function ProductQuickModal({ productoId, onClose }) {
+  const resolvedId = typeof productoId === 'object' ? productoId?.id : productoId
+  const initialVariantId = typeof productoId === 'object' ? productoId?.variantId : null
   const [producto,     setProducto]     = useState(null)
   const [loading,      setLoading]      = useState(true)
   const [varIdx,       setVarIdx]       = useState(0)
@@ -14,26 +17,27 @@ export default function ProductQuickModal({ productoId, onClose }) {
   const addItem = useCartStore(s => s.addItem)
 
   useEffect(() => {
-    if (!productoId) return
+    if (!resolvedId) return
     setLoading(true)
     setVarIdx(0); setImgIdx(0)
-    fetchProductoDetalle(productoId)
-      .then(setProducto)
+    fetchProductoDetalle(resolvedId)
+      .then(p => { setProducto(p); setVarIdx(Math.max(0, p.variantes.findIndex(v => v.id === initialVariantId))) })
       .catch(() => setProducto(null))
       .finally(() => setLoading(false))
-  }, [productoId])
+  }, [resolvedId, initialVariantId])
 
-  if (!productoId) return null
+  if (!resolvedId) return null
 
   const variante = producto?.variantes?.[varIdx]
+  const titulo = productTitle(producto, variante)
   const precio   = variante?.precio_venta ?? producto?.precio ?? 0
-  const imagenes = producto?.imagenes ?? []
+  const imagenes = producto?.imagenes_por_variante?.[variante?.id] ?? producto?.imagenes ?? []
 
   const handleAdd = () => {
     if (!producto || !variante) return
     addItem({
       id:      `${producto.id}-${variante.id}`,
-      nombre:  `${producto.nombre}${variante.descripcion ? ' · ' + variante.descripcion : ''}`,
+      nombre:  titulo,
       marca:   producto.marca,
       clave:   variante.clave,
       precio,
@@ -72,7 +76,7 @@ export default function ProductQuickModal({ productoId, onClose }) {
               <div className="relative bg-graphite-50 aspect-square sm:rounded-bl-xl overflow-hidden">
                 {imagenes.length > 0 ? (
                   <>
-                    <img src={imagenes[imgIdx]} alt={producto.nombre}
+                    <img src={imagenes[imgIdx]} alt={titulo}
                          className="w-full h-full object-contain p-4" />
                     {imagenes.length > 1 && (
                       <>
@@ -104,7 +108,8 @@ export default function ProductQuickModal({ productoId, onClose }) {
               <div className="p-5 flex flex-col gap-4">
                 <div>
                   <p className="text-xs font-bold text-accent uppercase tracking-wide">{producto.marca}</p>
-                  <h2 className="text-lg font-bold text-graphite-900 leading-snug mt-1">{producto.nombre}</h2>
+                  <h2 className="text-lg font-bold text-graphite-900 leading-snug mt-1">{titulo}</h2>
+                  <p className="text-xs text-graphite-500 mt-2">{productSummary(producto, variante)}</p>
                   <div className="flex items-center gap-1.5 mt-2">
                     <Star size={13} className="fill-amber-400 text-amber-400" />
                     <span className="text-xs text-graphite-600">4.5 · {producto.categoria_ml}</span>
@@ -125,8 +130,10 @@ export default function ProductQuickModal({ productoId, onClose }) {
                     <p className="text-xs font-semibold text-graphite-600 mb-2">Variante:</p>
                     <div className="flex flex-wrap gap-2">
                       {producto.variantes.map((v, i) => (
-                        <button key={v.id} onClick={() => setVarIdx(i)}
+                        <button key={v.id} onClick={() => { setVarIdx(i); setImgIdx(0) }}
+                          aria-pressed={i === varIdx}
                           className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors
+                            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                             ${i === varIdx
                               ? 'bg-accent text-white border-accent'
                               : 'border-graphite-200 text-graphite-600 hover:border-accent hover:text-accent'}`}>
@@ -162,7 +169,7 @@ export default function ProductQuickModal({ productoId, onClose }) {
                                disabled:opacity-40 disabled:cursor-not-allowed">
                     <ShoppingCart size={16} /> Agregar al carrito
                   </button>
-                  <Link to={`/tienda/producto/${producto.id}`} onClick={onClose}
+                  <Link to={`/tienda/producto/${producto.id}?variante=${encodeURIComponent(variante?.id ?? "")}`} onClick={onClose}
                     className="w-full flex items-center justify-center gap-2 py-2.5 border border-graphite-200
                                text-graphite-600 font-medium rounded-lg hover:border-accent hover:text-accent
                                transition-colors text-sm">

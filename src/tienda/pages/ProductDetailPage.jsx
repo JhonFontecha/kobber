@@ -1,5 +1,6 @@
+import { productTitle, productSummary } from '../utils/productPresentation.mjs'
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { ShoppingCart, Star, Package, ChevronLeft, ChevronRight, CheckCircle2, ArrowLeft } from 'lucide-react'
 import useCartStore from '../store/cartStore'
 import { fetchProductoDetalle } from '../hooks/useStoreProducts'
@@ -7,6 +8,8 @@ import { fetchProductoDetalle } from '../hooks/useStoreProducts'
 const fmt = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 
 export default function ProductDetailPage() {
+  const [searchParams] = useSearchParams()
+  const variantId = searchParams.get("variante")
   const { id }       = useParams()
   const [producto,   setProducto]   = useState(null)
   const [loading,    setLoading]    = useState(true)
@@ -19,10 +22,10 @@ export default function ProductDetailPage() {
   useEffect(() => {
     setLoading(true)
     fetchProductoDetalle(id)
-      .then(p => { setProducto(p); setVarIdx(0); setImgIdx(0) })
+      .then(p => { setProducto(p); setVarIdx(Math.max(0, p.variantes.findIndex(v => v.id === variantId))); setImgIdx(0) })
       .catch(() => setProducto(null))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, variantId])
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -40,13 +43,14 @@ export default function ProductDetailPage() {
   )
 
   const variante = producto.variantes[varIdx]
+  const titulo = productTitle(producto, variante)
   const precio   = variante?.precio_venta ?? producto.precio
-  const imagenes = producto.imagenes ?? []
+  const imagenes = producto.imagenes_por_variante?.[variante?.id] ?? producto.imagenes ?? []
 
   const handleAdd = () => {
     addItem({
       id:     `${producto.id}-${variante.id}`,
-      nombre: `${producto.nombre}${variante.descripcion ? ' · ' + variante.descripcion : ''}`,
+      nombre: titulo,
       marca:  producto.marca,
       clave:  variante.clave,
       precio,
@@ -74,7 +78,7 @@ export default function ProductDetailPage() {
             <span>/</span>
           </>
         )}
-        <span className="text-graphite-600 truncate max-w-[200px]">{producto.nombre}</span>
+        <span className="text-graphite-600 truncate max-w-[200px]">{titulo}</span>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-10">
@@ -84,7 +88,7 @@ export default function ProductDetailPage() {
           <div className="relative bg-graphite-50 rounded-xl aspect-square overflow-hidden">
             {imagenes.length > 0 ? (
               <>
-                <img src={imagenes[imgIdx]} alt={producto.nombre}
+                <img src={imagenes[imgIdx]} alt={titulo}
                      className="w-full h-full object-contain p-6" />
                 {imagenes.length > 1 && (
                   <>
@@ -127,8 +131,9 @@ export default function ProductDetailPage() {
           <div>
             <p className="text-sm font-bold text-accent uppercase tracking-widest">{producto.marca}</p>
             <h1 className="text-2xl sm:text-3xl font-bold text-graphite-900 leading-tight mt-1">
-              {producto.nombre}
+              {titulo}
             </h1>
+            <p className="text-sm text-graphite-500 mt-2">{productSummary(producto, variante)}</p>
             <div className="flex items-center gap-3 mt-3">
               <div className="flex items-center gap-1">
                 {[1,2,3,4,5].map(s => (
@@ -160,8 +165,10 @@ export default function ProductDetailPage() {
               </p>
               <div className="flex flex-wrap gap-2">
                 {producto.variantes.map((v, i) => (
-                  <button key={v.id} onClick={() => setVarIdx(i)}
+                  <button key={v.id} onClick={() => { setVarIdx(i); setImgIdx(0) }}
+                    aria-pressed={i === varIdx}
                     className={`px-4 py-2 rounded-lg text-sm font-medium border-2 transition-all
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                       ${i === varIdx
                         ? 'bg-accent text-white border-accent shadow-sm'
                         : 'border-graphite-200 text-graphite-600 hover:border-accent hover:text-accent'}`}>

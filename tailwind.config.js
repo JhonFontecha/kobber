@@ -21,6 +21,13 @@ module.exports = {
           800: '#582B14',
           900: '#38190B',
         },
+        // Alias semánticos usados por la tienda. El tono 600 mantiene un
+        // contraste AA (5.82:1) con texto blanco en botones y selecciones.
+        accent: {
+          DEFAULT: '#A04E22',
+          dark:    '#7C3D1B',
+          text:    '#7C3D1B',
+        },
         // ── Escala neutra cálida ─────────────────────────────────────────
         // 900 solo para footer/header. El resto del sitio respira en 50–100
         graphite: {

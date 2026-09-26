@@ -13,11 +13,9 @@ export default function Header({ onSearch }) {
 
   const handleSearch = (e) => {
     e.preventDefault()
-    if (searchVal.trim()) {
-      onSearch?.(searchVal.trim())
-      navigate('/tienda/catalogo')
-      setMobileOpen(false)
-    }
+    onSearch?.(searchVal.trim())
+    navigate('/tienda/catalogo')
+    setMobileOpen(false)
   }
 
   const navLinks = [
@@ -51,8 +49,8 @@ export default function Header({ onSearch }) {
           <form onSubmit={handleSearch} className="flex-1 max-w-xl mx-auto hidden sm:flex">
             <div className="relative w-full">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-400" />
-              <input type="text"
-                placeholder="Buscar herramientas, marcas..."
+              <input aria-label="Buscar productos" type="search"
+                placeholder="Buscar nombre, referencia, código o medida..."
                 value={searchVal}
                 onChange={e => setSearchVal(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 text-sm bg-graphite-50 border border-graphite-200
@@ -98,7 +96,7 @@ export default function Header({ onSearch }) {
         <div className="sm:hidden pb-3">
           <form onSubmit={handleSearch} className="relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-400" />
-            <input type="text" placeholder="Buscar herramientas..."
+            <input aria-label="Buscar productos" type="search" placeholder="Buscar nombre, referencia o medida..."
               value={searchVal} onChange={e => setSearchVal(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-graphite-50 border border-graphite-200
                          rounded-lg focus:outline-none focus:border-kobber-500 text-graphite-900" />

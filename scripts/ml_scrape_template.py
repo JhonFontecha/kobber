@@ -14,12 +14,14 @@ corridas) y este script solo se conecta a ella por CDP y abre una pestaña
 nueva ahí, sin tocar las demás pestañas.
 
 Corre con:
-  python3 scripts/ml_scrape_template.py --file /tmp/productos.txt
+  python3 scripts/ml_scrape_template.py --file productos.txt
   python3 scripts/ml_scrape_template.py "Producto 1" "Producto 2" ...
 """
 import sys, ssl, time, json, urllib.request, urllib.parse
 from playwright.sync_api import sync_playwright
 from ml_chrome import ensure_kobber_chrome, KOBBER_CDP_URL, PROFILE_DIR
+from runtime_paths import runtime_file
+from tls import verified_context
 
 URL = "https://www.mercadolibre.com.co/publicar-masivamente/categories"
 
@@ -71,7 +73,7 @@ SEARCH_OVERRIDES = {
 # ── Leer queries ──────────────────────────────────────────────────────────────
 if "--file" in sys.argv:
     idx = sys.argv.index("--file")
-    with open(sys.argv[idx + 1]) as f:
+    with open(sys.argv[idx + 1], encoding="utf-8") as f:
         queries = [l.strip() for l in f if l.strip()]
 elif len(sys.argv) > 1:
     queries = sys.argv[1:]
@@ -89,9 +91,7 @@ except RuntimeError as e:
     sys.exit(1)
 
 # ── Paso 1: Identificar categorías vía API ───────────────────────────────────
-ctx_ssl = ssl.create_default_context()
-ctx_ssl.check_hostname = False
-ctx_ssl.verify_mode    = ssl.CERT_NONE
+ctx_ssl = verified_context()
 
 def mejor_categoria(producto: str, reintentos: int = 3) -> dict | None:
     url = f"https://api.mercadolibre.com/sites/MCO/domain_discovery/search?limit=3&q={urllib.parse.quote(producto)}"
@@ -203,7 +203,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
     termino = SEARCH_OVERRIDES.get(category_name, category_name)
     print(f"\n  Buscando: '{termino[:50]}' → esperando '{category_name}' / '{domain_name[:35]}'")
 
-    page.screenshot(path=f"/tmp/ml_antes_busqueda.png")
+    page.screenshot(path=str(runtime_file("ml_antes_busqueda.png")))
 
     # Buscar el campo de texto con múltiples estrategias.
     # OJO: el header de ML tiene su propio buscador global ("Buscar tus
@@ -262,8 +262,8 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
                 continue
 
     if not search:
-        page.screenshot(path=f"/tmp/ml_sin_campo_busqueda.png")
-        print("  ⚠️  Campo de búsqueda no encontrado — ver /tmp/ml_sin_campo_busqueda.png")
+        page.screenshot(path=str(runtime_file("ml_sin_campo_busqueda.png")))
+        print(f"  Campo de búsqueda no encontrado — ver {runtime_file('ml_sin_campo_busqueda.png')}")
         return False
 
     # domain_name primero: es el dato más específico que ya decidió la API de
@@ -312,7 +312,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         search.press("Enter")
 
     time.sleep(2.5)
-    page.screenshot(path=f"/tmp/ml_{category_name[:15].replace(' ','_')}_resultados.png")
+    page.screenshot(path=str(runtime_file(f"ml_{category_name[:15]}_resultados.png")))
 
     # Si ML no encontró resultados, solo ofrece el chat del "Asistente" —
     # no hay nada que agregar, así que salimos antes de caer en ese modal.
@@ -404,7 +404,7 @@ def buscar_y_agregar(page, producto: str, category_name: str, domain_name: str) 
         except:
             continue
 
-    print(f"  ❌ Sin botón Agregar para '{termino}' — revisa /tmp/ml_*.png")
+    print(f"  Sin botón Agregar para '{termino}' — revisa {runtime_file('ml_inicio.png').parent}")
     return None
 
 print("\n=== PASO 2: Agregando categorías en ML ===")
@@ -419,7 +419,7 @@ with sync_playwright() as p:
     time.sleep(2)
 
     # Captura inicial para diagnóstico
-    page.screenshot(path="/tmp/ml_inicio.png")
+    page.screenshot(path=str(runtime_file("ml_inicio.png")))
     current_url = page.url
     print(f"URL actual: {current_url}")
 
@@ -428,7 +428,7 @@ with sync_playwright() as p:
     # headless con el mismo perfil). Como la ventana ya está visible, en vez
     # de cerrarla esperamos a que el usuario la resuelva a mano.
     if "login" in current_url or "registration" in current_url or "mercadolibre" not in current_url:
-        page.screenshot(path="/tmp/ml_login_redirect.png")
+        page.screenshot(path=str(runtime_file("ml_login_redirect.png")))
         print("\n=================================================")
         print("  ML pidió verificación de seguridad en esta ventana.")
         print("  Resuélvela a mano (contraseña / código / captcha) y")
@@ -446,8 +446,8 @@ with sync_playwright() as p:
     cerrar_tutorial(page)
 
     if not ir_a_tab_categorias(page):
-        page.screenshot(path="/tmp/ml_sin_tab_categorias.png")
-        print("⚠️  No se encontró el tab 'Buscar categorías' — ver /tmp/ml_sin_tab_categorias.png")
+        page.screenshot(path=str(runtime_file("ml_sin_tab_categorias.png")))
+        print(f"No se encontró el tab 'Buscar categorías' — ver {runtime_file('ml_sin_tab_categorias.png')}")
         page.close(); sys.exit(1)
 
     print("Tab activo: Buscar categorías\n")
@@ -467,7 +467,7 @@ with sync_playwright() as p:
         print("No se agregó ninguna. Abortando.")
         page.close(); sys.exit(1)
 
-    page.screenshot(path="/tmp/ml_antes_descarga.png")
+    page.screenshot(path=str(runtime_file("ml_antes_descarga.png")))
     print("\n=================================================")
     print("  Categorías agregadas. Revisa la pestaña abierta en Chrome:")
     print("  si alguna categoría no es la correcta, corrígela ahí mismo")
@@ -491,7 +491,7 @@ for item in plan:
 
 # Guardar el plan como JSON para que fill-blank-template lo use
 import json as _json
-plan_path = "/tmp/ml_category_plan.json"
-with open(plan_path, "w") as f:
+plan_path = runtime_file("ml_category_plan.json")
+with open(plan_path, "w", encoding="utf-8") as f:
     _json.dump(plan, f, ensure_ascii=False, indent=2)
 print(f"\n💾 Plan guardado en: {plan_path}")

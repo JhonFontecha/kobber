@@ -1,120 +1,137 @@
 # Kobber
 
-Herramienta interna para gestión de catálogo de herramientas Truper/Pretul/FIERO y publicación
-masiva en MercadoLibre Colombia, más una tienda pública de cara al cliente. Ver **[CLAUDE.md](./CLAUDE.md)**
-para arquitectura completa, rutas de API, esquema de base de datos y convenciones — este archivo
-es sólo la guía para dejarlo corriendo desde cero.
+Herramienta de catálogo Truper/Pretul/FIERO, publicador local de MercadoLibre y tienda pública.
+Arquitectura: [CLAUDE.md](CLAUDE.md). Operación de Chrome: [scripts/ML_RUNBOOK.md](scripts/ML_RUNBOOK.md).
 
-## Requisitos previos
+## Requisitos
 
-- **Python 3.14** (o compatible) con `venv`
-- **Node.js 18+** y npm 9+
-- Una **API key de Anthropic** ([console.anthropic.com](https://console.anthropic.com))
-- Un **proyecto de Supabase** (Postgres + Storage) ya creado, con la URL y las keys a mano
-- **Google Chrome** instalado (necesario para el publicador ML y los scripts de `scripts/ml_*.py`) —
-  Playwright usa el Chrome del sistema directamente en vez de descargar su propio Chromium, porque
-  en macOS 13 (Ventura) `playwright install chromium` falla por falta de soporte de esa versión de
-  Playwright a ese OS. No hace falta correr `playwright install`.
+- Python **3.10+**, recomendado **3.14**, con venv.
+- Node **20.19+ en la serie 20, o 22.12+**; recomendado Node 24 LTS. npm incluido.
+- Google Chrome instalado para los procesos de MercadoLibre.
+- Proyecto Supabase con sus tablas y credenciales. Clonar el código no crea las tablas.
+- Clave Anthropic para funciones de IA; no es necesaria para consultar el catálogo.
 
-## Puesta en marcha desde cero (clonar en una Mac nueva)
+## Instaladores para equipos de escritorio
 
-### 1. Backend
+Los archivos destinados a los siete equipos locales están aislados en
+`deployment/`; no participan en el despliegue del servidor.
 
-```bash
-cd backend
-python3 -m venv venv
-venv/bin/pip install -r requirements.txt
+Windows:
+
+- Primera vez: `deployment/windows/instalar_Kobber.bat`
+- Uso diario: `deployment/windows/iniciar_Kobber.bat`
+- Actualización: `deployment/windows/actualizar_Kobber.bat`
+
+macOS:
+
+- Primera vez: `deployment/macos/instalar_Kobber.command`
+- Uso diario: `deployment/macos/iniciar_Kobber.command`
+- Actualización: `deployment/macos/actualizar_Kobber.command`
+
+El instalador comprueba Git, Python, Node/npm y Chrome; clona `main` en
+`Documents/Proyectos/kobber`; prepara backend y frontend; abre el `.env` si
+falta; compila; ejecuta las pruebas; crea un acceso directo y arranca Kobber.
+El actualizador conserva credenciales y datos locales, exige una copia limpia
+de `main` y nunca descarta cambios del usuario. Consulta `deployment/README.md`.
+
+Linux: desde la raíz del repositorio:
+```sh
+python3 scripts/start.py
 ```
 
-Si falla instalando Pillow (error compilando por falta de headers de jpeg), no es bloqueante —
-correr `venv/bin/pip install pillow` suelto instala una versión más nueva que sí trae wheel
-precompilado para macOS/Python 3.14.
+Windows, macOS y Linux usan internamente el mismo iniciador Python:
+1. Valida herramientas; si hay un proceso en 8000 o 5173, informa y se detiene sin matarlo.
+2. Crea el entorno local si falta e instala las versiones de backend/requirements.txt.
+3. Ejecuta npm ci cuando faltan dependencias o cambia package-lock.json.
+4. Crea backend/.env desde la plantilla si falta. Completa el archivo y vuelve a ejecutar.
+5. Arranca servicios solo en 127.0.0.1; comprueba Supabase con una consulta de lectura.
+6. Abre http://127.0.0.1:5173/admin.
 
-Copiar `backend/.env.example` a `backend/.env` y completar las 4 variables (API key de Anthropic +
-las 3 de Supabase). `config.py` carga el `.env` relativo a su propia ubicación, así que no importa
-desde qué carpeta corras los comandos.
+Mantén abierta la ventana del iniciador. **Ctrl+C** detiene los dos procesos que inició.
+No se garantiza limpieza al forzar el cierre de la ventana o apagar el equipo; si un puerto
+queda ocupado, identifica el proceso antes de cerrarlo. Registros: .kobber/backend.log y frontend.log.
+Tras cambiar .env, detén con Ctrl+C y vuelve a iniciar para cargar la configuración nueva.
 
-### 2. Frontend
+## Configuración local
 
-```bash
-# desde la raíz del repo
-npm install
+Archivo: backend/.env (nunca subirlo al repositorio):
+```dotenv
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_KEY=tu_clave_publica
+SUPABASE_SERVICE_KEY=tu_clave_de_servicio
+ANTHROPIC_API_KEY=tu_clave
+STORAGE_PATH=./storage
+KOBBER_DATA_DIR=.kobber
 ```
 
-### 3. Sesión de MercadoLibre (para publicar/renovar plantillas)
+Las rutas relativas parten **siempre de la raíz del proyecto**, incluso al iniciar desde otra
+carpeta. Usa rutas relativas cuando compartas la configuración entre sistemas; una ruta absoluta
+de un equipo no es portable. CHROME_EXECUTABLE permite indicar la ruta absoluta de Chrome si
+está fuera de sus ubicaciones habituales. En .env las rutas se escriben sin escapes de shell.
 
-`playwright` ya se instaló con `requirements.txt` — sólo falta crear la sesión guardada, con
-cualquiera de estas dos opciones (misma sesión, mismo perfil de Chrome):
+.kobber contiene el perfil de Chrome, capturas y planes del publicador; no se versiona.
+No copies esa carpeta ni backend/venv ni node_modules entre equipos: las dependencias se reinstalan
+en cada sistema. Si antes usabas el perfil antiguo /tmp/ml_chrome_profile, inicia sesión ML de nuevo
+en el perfil nuevo; el iniciador no copia cookies ni borra el perfil anterior.
 
-- **Desde el panel admin** (sin terminal): paso 2 del publicador → botón "🔑 Iniciar sesión ML"
-  (aparece cuando "↻ Verificar" muestra sin sesión). Abre una pestaña en el Chrome de Kobber para
-  loguearte a mano.
-- **Por terminal** (abre un Chrome real para que te loguees a mano):
-  ```bash
-  backend/venv/bin/python3 scripts/ml_login.py
-  ```
+## Instalación y arranque manual
 
-La sesión expira cada tanto — cuando eso pase, repetir cualquiera de las dos opciones.
-
-## Correr en desarrollo
-
-**Opción rápida (sin terminal):** doble clic en `Iniciar Kobber.command` en la raíz del repo —
-levanta backend y frontend, abre el navegador solo, y se apaga cerrando la ventana o con Ctrl+C.
-Requiere haber hecho la instalación de arriba al menos una vez.
-
-**Manual**, dos servidores en simultáneo, cada uno en su propia terminal:
-
-```bash
-# Backend — desde la raíz del repo
-backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir backend
-
-# Frontend — desde la raíz del repo
-npm run dev
+Windows (desde la raíz):
+```powershell
+py -3 -m venv backend\venv
+backend\venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+npm.cmd ci
+backend\venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir backend --no-proxy-headers
 ```
+En otra terminal: `npm.cmd run dev`.
 
-Abrir http://localhost:5173 — tienda pública en `/`, panel admin en `/admin`. Las llamadas `/api/*`
-se proxean automáticamente a `localhost:8000`.
-
-## Antes de reportar algo raro: revisar procesos huérfanos
-
-Si dejaste un `npm run dev` o `uvicorn --reload` corriendo de una sesión de terminal anterior (o de
-una sesión de Claude Code anterior) y arrancás uno nuevo, es fácil terminar con **dos procesos**
-compitiendo por el mismo puerto — el viejo sirviendo código desactualizado sin que se note (los
-health checks básicos responden igual). Esto ya costó una sesión entera de debugging confuso
-(2026-08-12: cambios en `App.jsx` que no se reflejaban en el navegador porque un Vite viejo de
-horas atrás seguía escuchando en el 5173).
-
-Si algo no refleja un cambio que sabés que hiciste:
-
-```bash
-lsof -nP -iTCP:5173 -sTCP:LISTEN   # frontend
-lsof -nP -iTCP:8000 -sTCP:LISTEN   # backend
-ps -o pid,lstart,command -p <PID>  # ver hace cuánto arrancó ese proceso
+macOS/Linux (desde la raíz):
+```sh
+python3 -m venv backend/venv
+backend/venv/bin/python -m pip install -r backend/requirements.txt
+npm ci
+backend/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir backend --no-proxy-headers
 ```
+En otra terminal: `npm run dev`.
 
-Si el proceso es mucho más viejo que la sesión actual, matarlo (`kill <PID>`) y volver a arrancar
-limpio antes de seguir investigando el código.
+Pillow está fijado a 12.3.0, compatible con Python 3.14. Ya no hace falta omitirlo de requirements.
 
-## Build para producción
+## Comprobación
 
-```bash
-npm run build
+- Tienda: http://127.0.0.1:5173/
+- Administrador: http://127.0.0.1:5173/admin
+- API: http://127.0.0.1:8000/health
+- Lectura Supabase: http://127.0.0.1:8000/health/db (503 si falla).
+
+```powershell
+backend\venv\Scripts\python.exe scripts\start.py --check
+backend\venv\Scripts\python.exe -m unittest discover -s tests -v
+npm.cmd run build
+npm.cmd audit
 ```
+En macOS/Linux sustituye el ejecutable por backend/venv/bin/python y npm.cmd por npm.
+El modo --check no instala, no inicia servicios ni consulta Supabase.
+La integración continua verifica Windows, macOS y Linux con Python 3.10 y 3.14.
 
-## Deploy de la tienda pública (servidor, no la Mac)
+## Publicador y seguridad
 
-El Publicador (panel admin) no se deploya — sigue corriendo sólo local, en la Mac de la empresa
-(necesita Playwright/Chrome y a alguien presente para loguearse en ML). Lo único que se sube a un
-servidor es la **tienda pública**, como dos servicios separados definidos en `render.yaml`
-(backend chico sin Playwright/Claude + frontend estático sin el panel admin) — detalle completo en
-[CLAUDE.md → "Deploy"](./CLAUDE.md#deploy).
+Para MercadoLibre usa el botón de iniciar sesión del panel, o ejecuta scripts/ml_login.py
+con el Python del entorno virtual. Chrome se detecta por sistema y mantiene un perfil propio.
+No hace falta descargar Chromium con Playwright.
 
-Pasos con [Render](https://render.com) (tiene free tier permanente):
+El administrador es **local y de un solo usuario**. Se rechazan clientes remotos, hosts desconocidos
+y solicitudes de otros orígenes. Esto no equivale a cuentas de usuario: una aplicación local puede
+acceder al backend. No publiques main:app en Internet ni lo coloques detrás de un proxy.
+La pantalla LoginPage todavía es una demostración, no autentica el backend.
 
-1. Crear cuenta en Render y conectar el repo de GitHub.
-2. "New" → "Blueprint" → elegir este repo → Render detecta `render.yaml` automáticamente.
-3. Completar las variables marcadas como secretas en el dashboard (`SUPABASE_URL`, `SUPABASE_KEY`,
-   `SUPABASE_SERVICE_KEY` del servicio `kobber-store-api`) — nunca van en el yaml ni en git.
-4. Deployar. Si Render tuvo que renombrar algún servicio (nombre ocupado), actualizar a mano el
-   rewrite del static site y `ALLOWED_ORIGINS` del backend con las URLs reales (ver nota en
-   `render.yaml`).
+Las cargas se limitan a 25 MiB por archivo y 100 MiB de contenido ZIP declarado expandido.
+Solo sube documentos de fuentes confiables; estos límites no son un antivirus ni limitan el
+tiempo de procesamiento de todos los formatos.
+
+## Tienda pública
+
+render.yaml despliega main_public:app y un frontend con VITE_PUBLIC_ONLY=true.
+El publicador no forma parte de ese backend público.
+Antes de publicar la tienda revisa los hallazgos del reporte de seguridad:
+la API de tienda expone costos de proveedor y el checkout/login son demostraciones.
+Se requiere diseño de permisos/RLS de solo lectura para sustituir la clave de servicio en la API pública.
