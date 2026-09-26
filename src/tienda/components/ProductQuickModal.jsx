@@ -126,7 +126,9 @@ export default function ProductQuickModal({ productoId, onClose }) {
                     <div className="flex flex-wrap gap-2">
                       {producto.variantes.map((v, i) => (
                         <button key={v.id} onClick={() => setVarIdx(i)}
+                          aria-pressed={i === varIdx}
                           className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors
+                            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                             ${i === varIdx
                               ? 'bg-accent text-white border-accent'
                               : 'border-graphite-200 text-graphite-600 hover:border-accent hover:text-accent'}`}>

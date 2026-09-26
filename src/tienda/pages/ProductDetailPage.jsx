@@ -161,7 +161,9 @@ export default function ProductDetailPage() {
               <div className="flex flex-wrap gap-2">
                 {producto.variantes.map((v, i) => (
                   <button key={v.id} onClick={() => setVarIdx(i)}
+                    aria-pressed={i === varIdx}
                     className={`px-4 py-2 rounded-lg text-sm font-medium border-2 transition-all
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                       ${i === varIdx
                         ? 'bg-accent text-white border-accent shadow-sm'
                         : 'border-graphite-200 text-graphite-600 hover:border-accent hover:text-accent'}`}>
