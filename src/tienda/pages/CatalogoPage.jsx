@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { productMatches } from '../utils/productPresentation.mjs'
+import { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal, X, ChevronDown, Loader2 } from 'lucide-react'
 import { useStoreProducts } from '../hooks/useStoreProducts'
@@ -28,10 +29,7 @@ export default function CatalogoPage({ searchQuery = '' }) {
 
   const filtered = useMemo(() => {
     let list = [...productos]
-    const q = searchQuery.toLowerCase()
-    if (q) list = list.filter(p =>
-      [p.nombre, p.marca, p.categoria, p.descripcion].join(' ').toLowerCase().includes(q)
-    )
+    if (searchQuery.trim()) list = list.filter(p => productMatches(p, searchQuery))
     if (filtros.categorias.length) list = list.filter(p => filtros.categorias.includes(p.categoria_ml))
     if (filtros.marcas.length)     list = list.filter(p => filtros.marcas.includes(p.marca))
     if (filtros.precioMin)         list = list.filter(p => p.precio >= Number(filtros.precioMin))
@@ -42,6 +40,8 @@ export default function CatalogoPage({ searchQuery = '' }) {
     if (orden === 'nombre')        list.sort((a, b) => a.nombre.localeCompare(b.nombre))
     return list
   }, [productos, filtros, orden, searchQuery])
+
+  useEffect(() => { setPage(1) }, [searchQuery])
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -190,7 +190,7 @@ export default function CatalogoPage({ searchQuery = '' }) {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
               {paginated.map(p => (
-                <ProductCard key={p.id} producto={p} onQuickView={setQuickId} />
+                <ProductCard key={`${p.id}:${searchQuery}`} searchQuery={searchQuery} producto={p} onQuickView={setQuickId} />
               ))}
             </div>
           )}

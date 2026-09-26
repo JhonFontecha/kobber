@@ -4,6 +4,7 @@ API para la tienda pública — lee productos de la BD con precio de venta aplic
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from database import get_client
+from variant_images import galleries
 
 router = APIRouter()
 
@@ -11,7 +12,7 @@ _SELECT = (
     "id, nombre, descripcion, marca, categoria, categoria_ml, caracteristicas, estado, "
     "product_attributes(nombre, valor, unidad, variant_id), "
     "product_variants(id, clave, codigo, descripcion, precio_distribuidor, nc, stock, unidades_caja, estado), "
-    "product_images(url, orden)"
+    "product_images(url, orden, variant_id)"
 )
 
 
@@ -45,6 +46,7 @@ def _serialize(p: dict, margen: float) -> dict | None:
             for v in variantes
         ],
         "imagenes":     [f["url"] for f in fotos],
+        "imagenes_por_variante": galleries(fotos, p.get("product_variants") or []),
         "precio":       round(precio_base * (1 + margen / 100)),
         "precio_dist":  precio_base,
         "stock_total":  sum(v.get("stock") or 0 for v in variantes),

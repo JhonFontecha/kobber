@@ -22,8 +22,8 @@ elif [ -e "$TARGET" ]; then
   exit 1
 else
   mkdir -p "$HOME/Documents/Proyectos"
-  echo "Descargando Kobber desde la rama main..."
-  git clone --branch main --single-branch "$REPO_URL" "$TARGET"
+  echo "Descargando Kobber desde la rama ajustes_kobber_J..."
+  git clone --branch ajustes_kobber_J --single-branch "$REPO_URL" "$TARGET"
 fi
 
 if ! python3 "$TARGET/deployment/common/manage.py" install "$@"; then

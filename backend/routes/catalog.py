@@ -568,6 +568,7 @@ def _call_claude(image_bytes: bytes) -> list[dict]:
 
 def _save_to_supabase(products_data: list) -> dict:
     from routes.images import _save_images
+    from variant_images import image_variant_id
 
     db = get_client()
     saved_products  = 0
@@ -633,10 +634,7 @@ def _save_to_supabase(products_data: list) -> dict:
         # imagenes_candidatas encontradas durante la extraccion). None = el frontend
         # no mando este campo -> cae al fetch en background de siempre.
         imagenes_sel = p.get("imagenes_seleccionadas")
-        if imagenes_sel is not None:
-            if imagenes_sel:
-                _save_images(product_id, imagenes_sel)
-        else:
+        if imagenes_sel is None:
             product_ids_sin_seleccion.append(product_id)
 
         # Atributos de familia extraídos del catálogo
@@ -665,6 +663,7 @@ def _save_to_supabase(products_data: list) -> dict:
         }
 
         # Variantes y sus atributos
+        saved_image_variants = []
         for v in variantes:
             clave = v.get("clave")
             vresult = db.table("product_variants").insert({
@@ -681,6 +680,7 @@ def _save_to_supabase(products_data: list) -> dict:
                 "titulos_sugeridos":   titulos_idx.get(clave, []),
             }).execute()
             variant_id = vresult.data[0]["id"]
+            saved_image_variants.append({"id": variant_id, "clave": clave})
             saved_variants += 1
 
             variant_attrs = list(v.get("atributos", []))
@@ -695,6 +695,13 @@ def _save_to_supabase(products_data: list) -> dict:
                      "nombre": a["nombre"], "valor": a["valor"], "unidad": a.get("unidad")}
                     for a in variant_attrs
                 ]).execute()
+
+        if imagenes_sel:
+            grouped_images = defaultdict(list)
+            for url in dict.fromkeys(imagenes_sel):
+                grouped_images[image_variant_id(url, saved_image_variants)].append(url)
+            for image_variant, urls in grouped_images.items():
+                _save_images(product_id, urls, variant_id=image_variant)
 
     return {
         "productos":   saved_products,
@@ -711,28 +718,15 @@ async def _fetch_and_save_images_bulk(product_ids: list[str]):
     from routes.images import _fetch_for_clave, _save_images
 
     db = get_client()
-    rows = db.table("product_variants").select("product_id, clave") \
+    rows = db.table("product_variants").select("id, product_id, clave") \
         .in_("product_id", product_ids).execute().data
 
-    by_product: dict[str, list[str]] = defaultdict(list)
-    for r in rows:
-        if r.get("clave"):
-            by_product[r["product_id"]].append(r["clave"])
+    async def fetch_one(variant):
+        urls = await _fetch_for_clave(variant["clave"])
+        if urls:
+            _save_images(variant["product_id"], urls, variant_id=variant["id"])
 
-    async def fetch_one(product_id: str, claves: list[str]):
-        all_urls: list[str] = []
-        for clave in claves:
-            urls = await _fetch_for_clave(clave)
-            all_urls.extend(urls)
-        seen: set = set()
-        unique = [u for u in all_urls if not (u in seen or seen.add(u))]
-        if unique:
-            _save_images(product_id, unique)
-
-    await asyncio.gather(*[
-        fetch_one(pid, claves)
-        for pid, claves in by_product.items()
-    ])
+    await asyncio.gather(*[fetch_one(v) for v in rows if v.get("clave")])
 
 
 def _sse(data: dict) -> str:

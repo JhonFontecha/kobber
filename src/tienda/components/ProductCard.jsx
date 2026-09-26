@@ -1,27 +1,35 @@
+import { useState } from 'react'
+import { productTitle, productSummary, matchingVariant } from '../utils/productPresentation.mjs'
 import { Link } from 'react-router-dom'
-import { ShoppingCart, Star, Eye, Package } from 'lucide-react'
+import { ShoppingCart, Star, Eye, Package, ChevronLeft, ChevronRight } from 'lucide-react'
 import useCartStore from '../store/cartStore'
 
 const fmt = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 
-export default function ProductCard({ producto, onQuickView }) {
+export default function ProductCard({ producto, onQuickView, searchQuery = '' }) {
   const addItem = useCartStore(s => s.addItem)
   const setOpen = useCartStore(s => s.setOpen)
 
-  const imagen    = producto.imagenes?.[0] ?? producto.imagen ?? ''
-  const precio    = producto.precio ?? 0
+  const [varIdx, setVarIdx] = useState(() => matchingVariant(producto, searchQuery))
+  const variantes = producto.variantes ?? []
+  const variante = variantes[varIdx] ?? variantes[0]
+  const titulo = productTitle(producto, variante)
+  const detailUrl = `/tienda/producto/${producto.id}${variante ? `?variante=${encodeURIComponent(variante.id)}` : ''}`
+  const gallery = producto.imagenes_por_variante?.[variante?.id] ?? producto.imagenes
+  const imagen = gallery ? (gallery[0] ?? '') : (producto.imagen ?? '')
+  const precio    = variante?.precio_venta ?? producto.precio ?? 0
   const precioAnt = producto.precioAnterior ?? null
-  const stock     = producto.stock_total ?? producto.stock ?? 0
+  const stock     = variante ? (variante.stock ?? 0) : (producto.stock_total ?? producto.stock ?? 0)
   const descuento = precioAnt ? Math.round((1 - precio / precioAnt) * 100) : (producto.descuento ?? 0)
   const rating    = producto.rating ?? 4.5
   const agotado   = stock === 0
 
   const handleAdd = (e) => {
     e.preventDefault(); e.stopPropagation()
-    const v = producto.variantes?.[0]
+    const v = variante
     addItem({
       id:     v ? `${producto.id}-${v.id}` : producto.id,
-      nombre: producto.nombre,
+      nombre: titulo,
       marca:  producto.marca,
       clave:  v?.clave ?? producto.clave ?? '',
       precio,
@@ -32,7 +40,7 @@ export default function ProductCard({ producto, onQuickView }) {
 
   const handleQuick = (e) => {
     e.preventDefault(); e.stopPropagation()
-    onQuickView?.(producto.id)
+    onQuickView?.({ id: producto.id, variantId: variante?.id })
   }
 
   return (
@@ -40,10 +48,10 @@ export default function ProductCard({ producto, onQuickView }) {
                          rounded-lg shadow-card hover:shadow-float hover:-translate-y-0.5
                          transition-all duration-200">
       {/* Imagen */}
-      <Link to={`/tienda/producto/${producto.id}`}
+      <Link to={detailUrl}
             className="relative overflow-hidden bg-graphite-50 aspect-square block">
         {imagen ? (
-          <img src={imagen} alt={producto.nombre}
+          <img src={imagen} alt={titulo}
                className="w-full h-full object-contain p-3 group-hover:scale-105 transition-transform duration-300"
                loading="lazy" />
         ) : (
@@ -85,12 +93,20 @@ export default function ProductCard({ producto, onQuickView }) {
         <p className="text-[10px] font-bold text-kobber-700 uppercase tracking-wider mb-0.5">
           {producto.marca}
         </p>
-        <Link to={`/tienda/producto/${producto.id}`}
+        <Link to={detailUrl}
           className="text-sm font-medium text-graphite-800 leading-snug flex-1 line-clamp-2
                      hover:text-kobber-600 transition-colors">
-          {producto.nombre}
+          {titulo}
         </Link>
 
+        <p className="text-xs text-graphite-500 mt-2 line-clamp-2">{productSummary(producto, variante)}</p>
+        {variantes.length > 1 && (
+          <div className="flex items-center justify-between gap-2 mt-3" aria-label="Presentaciones del producto">
+            <button type="button" aria-label="Variante anterior" onClick={() => setVarIdx(i => (i - 1 + variantes.length) % variantes.length)} className="p-2 rounded-full border border-graphite-200 hover:bg-graphite-100 focus-visible:ring-2 focus-visible:ring-accent"><ChevronLeft size={18} /></button>
+            <span className="text-xs text-center text-graphite-600" aria-live="polite">{variante?.descripcion || variante?.clave}<br />{varIdx + 1} de {variantes.length}</span>
+            <button type="button" aria-label="Variante siguiente" onClick={() => setVarIdx(i => (i + 1) % variantes.length)} className="p-2 rounded-full border border-graphite-200 hover:bg-graphite-100 focus-visible:ring-2 focus-visible:ring-accent"><ChevronRight size={18} /></button>
+          </div>
+        )}
         {/* Rating */}
         <div className="flex items-center gap-1 mt-2">
           <Star size={11} className="fill-amber-400 text-amber-400" />
