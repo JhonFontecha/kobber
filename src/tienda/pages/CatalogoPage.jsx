@@ -27,8 +27,28 @@ export default function CatalogoPage({ searchQuery = '' }) {
 
   const { productos, total, categorias, marcas, loading } = useStoreProducts()
 
+  const productosPorVariante = useMemo(() => {
+  return productos.flatMap(producto =>
+    (producto.variantes ?? []).map(variante => ({
+      ...producto,
+
+      // Identificador único de la tarjeta del catálogo.
+      catalogKey: `${producto.id}:${variante.id}`,
+
+      // Cada tarjeta trabaja únicamente con su variante.
+      variantes: [variante],
+
+      // Valores específicos de esta variante.
+      precio: variante.precio_venta ?? producto.precio,
+      precio_dist:
+        variante.precio_distribuidor ?? producto.precio_dist,
+      stock_total: variante.stock ?? 0,
+    }))
+  )
+}, [productos])
+
   const filtered = useMemo(() => {
-    let list = [...productos]
+    let list = [...productosPorVariante]
     if (searchQuery.trim()) list = list.filter(p => productMatches(p, searchQuery))
     if (filtros.categorias.length) list = list.filter(p => filtros.categorias.includes(p.categoria_ml))
     if (filtros.marcas.length)     list = list.filter(p => filtros.marcas.includes(p.marca))
@@ -39,7 +59,7 @@ export default function CatalogoPage({ searchQuery = '' }) {
     if (orden === 'precio-desc')   list.sort((a, b) => b.precio - a.precio)
     if (orden === 'nombre')        list.sort((a, b) => a.nombre.localeCompare(b.nombre))
     return list
-  }, [productos, filtros, orden, searchQuery])
+  }, [productosPorVariante, filtros, orden, searchQuery])
 
   useEffect(() => { setPage(1) }, [searchQuery])
 
@@ -190,7 +210,7 @@ export default function CatalogoPage({ searchQuery = '' }) {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
               {paginated.map(p => (
-                <ProductCard key={`${p.id}:${searchQuery}`} searchQuery={searchQuery} producto={p} onQuickView={setQuickId} />
+                <ProductCard key={`${p.catalogKey}:${searchQuery}`} searchQuery={searchQuery} producto={p} onQuickView={setQuickId} />
               ))}
             </div>
           )}
