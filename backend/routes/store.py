@@ -107,9 +107,32 @@ def _product_extra(db) -> str:
     return (", " + ", ".join(extras)) if extras else ""
 
 
+# 'descontinuado' es el valor que acepta product_variants_estado_check.
+# 'inactivo' quedó en una versión anterior del script y la base lo rechaza.
+_ESTADOS_OCULTOS = {"descontinuado", "inactivo"}
+
+
+def _filas(value) -> list:
+    """PostgREST manda un array. Si llega otra cosa, no tumbes el catálogo."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _orden_foto(img: dict) -> int:
+    try:
+        return int(img.get("orden") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _plazo(row: dict) -> str:
-    propio = (row.get("plazo_envio") or "").strip()
-    return propio or settings()["plazo_envio"]
+    propio = row.get("plazo_envio")
+    if isinstance(propio, str) and propio.strip():
+        return propio.strip()
+    return settings()["plazo_envio"]
 
 
 def _public_variant(variant: dict, venta: int, anterior, descuento) -> dict:
@@ -126,24 +149,28 @@ def _public_variant(variant: dict, venta: int, anterior, descuento) -> dict:
 
 
 def _build_item(row: dict) -> dict | None:
-    if row.get("vendible") is False:
+    if not isinstance(row, dict) or row.get("vendible") is False:
         return None
-    variantes_raw = [v for v in (row.get("product_variants") or []) if v.get("estado") != "inactivo"]
     variantes = []
-    for variant in variantes_raw:
-        venta = precio_venta(variant.get("precio_distribuidor"), variant.get("porcentaje_kobber"))
+    for variant in _filas(row.get("product_variants")):
+        if variant.get("estado") in _ESTADOS_OCULTOS:
+            continue
+        try:
+            venta = precio_venta(variant.get("precio_distribuidor"), variant.get("porcentaje_kobber"))
+            anterior, descuento = oferta(venta, variant.get("precio_anterior"))
+        except (TypeError, ValueError, OverflowError):
+            continue
         if venta is None:
             continue
-        anterior, descuento = oferta(venta, variant.get("precio_anterior"))
         variantes.append(_public_variant(variant, venta, anterior, descuento))
     if not variantes:
         return None
 
     variantes.sort(key=lambda v: v["precio_venta"])
     primaria = variantes[0]
-    fotos = sorted(row.get("product_images") or [], key=lambda img: img.get("orden") or 0)
+    fotos = sorted(_filas(row.get("product_images")), key=_orden_foto)
     urls = [img["url"] for img in fotos if img.get("url")]
-    atributos = [a for a in (row.get("product_attributes") or []) if not a.get("variant_id")]
+    atributos = [a for a in _filas(row.get("product_attributes")) if not a.get("variant_id")]
 
     return {
         "id": row["id"],
@@ -235,13 +262,23 @@ def _load_catalog():
         log.exception("No se pudo leer el catálogo")
         raise HTTPException(status_code=503, detail="No se pudo cargar el catálogo.")
 
+    # Una fila mala no puede tumbar GET /productos: eso salía como 500 de uvicorn,
+    # no como el 503 de arriba, porque este armado queda fuera de ese try.
     items = []
-    for row in rows:
-        item = _build_item(row)
+    for row in _filas(rows):
+        try:
+            item = _build_item(row)
+        except Exception:
+            log.exception("Producto %s omitido del catálogo", row.get("id") if isinstance(row, dict) else None)
+            continue
         if item:
             items.append(item)
-    categorias = sorted({item["categoria_ml"] for item in items if item.get("categoria_ml")})
-    marcas = sorted({item["marca"] for item in items if item.get("marca")})
+    try:
+        categorias = sorted({item["categoria_ml"] for item in items if isinstance(item.get("categoria_ml"), str)})
+        marcas = sorted({item["marca"] for item in items if isinstance(item.get("marca"), str)})
+    except TypeError:
+        log.exception("No se pudieron armar los filtros del catálogo")
+        categorias, marcas = [], []
     with _cache_lock:
         _cache.update(exp=time.monotonic() + _CACHE_TTL, items=items, categorias=categorias, marcas=marcas)
     return items, categorias, marcas
@@ -495,7 +532,7 @@ async def crear_pedido(request: Request):
     subtotal = 0
     for item in body.items:
         row = by_id.get(str(item.variant_id))
-        if not row or row.get("estado") == "inactivo":
+        if not row or row.get("estado") in _ESTADOS_OCULTOS:
             raise HTTPException(status_code=400, detail="Hay un producto que ya no está disponible.")
         parent = row.get("products") or {}
         if isinstance(parent, list):

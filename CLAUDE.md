@@ -148,7 +148,8 @@ pedido ya hecho y no se reescribe.
   `store_pricing.PASARELAS` sin cobrar en el formulario.
 - La tienda no muestra ni usa `product_variants.stock`. Un producto publicado está "Disponible"
   y lleva un plazo (`products.plazo_envio`, o `KOBBER_PLAZO_ENVIO` si está vacío). `products.vendible = false`
-  lo saca del catálogo. `stock` sigue existiendo para el publicador; `stock_ml` es la cantidad que va
+  lo saca del catálogo. Una variante con `estado = 'descontinuado'` tampoco se lista ni se puede pedir
+  (`product_variants_estado_check` solo permite `activo`, `descontinuado` y `sin_stock`). `stock` sigue existiendo para el publicador; `stock_ml` es la cantidad que va
   al Excel de ML. `stock_full` y `ml_stock_movements` son el inventario físico en bodegas Mercado Libre
   Full: solo el panel (`POST /api/products/variants/{id}/stock-full`), nunca la tienda. Igual con el margen:
   `porcentaje_kobber` (tienda pública) y `porcentaje_ml` (Excel de ML) son columnas separadas y

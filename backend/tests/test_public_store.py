@@ -231,5 +231,90 @@ class PublicStoreTests(unittest.TestCase):
             self.assertEqual(cerrado.status_code, 503)
 
 
+    def test_catalogo_tolera_fila_rota_y_oculta_descontinuado(self):
+        # Precio numérico como lo manda PostgREST (texto) y orden de foto mezclado.
+        # Antes, orden int mezclado con str rompía sorted() y uvicorn respondía 500.
+        bueno = {
+            "id": "prod-numerico",
+            "nombre": "Precio numérico",
+            "marca": "Truper",
+            "categoria": "Destornilladores",
+            "categoria_ml": "Destornilladores",
+            "estado": "publicado",
+            "vendible": True,
+            "plazo_envio": None,
+            "caracteristicas": [],
+            "product_attributes": [],
+            "product_images": [
+                {"url": "https://www.truper.com/media/a.jpg", "orden": 1},
+                {"url": "https://www.truper.com/media/b.jpg", "orden": "2"},
+            ],
+            "product_variants": [
+                {
+                    "id": "var-numerico",
+                    "clave": "DG-OK",
+                    "descripcion": "1/8 x 4",
+                    "precio_distribuidor": "4300.00",
+                    "porcentaje_kobber": "30.00",
+                    "precio_anterior": None,
+                    "estado": "activo",
+                },
+                {
+                    "id": "var-off",
+                    "clave": "DG-OFF",
+                    "descripcion": "no va",
+                    "precio_distribuidor": 1000,
+                    "porcentaje_kobber": 30,
+                    "estado": "descontinuado",
+                },
+            ],
+        }
+        roto = {
+            "id": "prod-roto",
+            "nombre": "Fila inválida",
+            "marca": "Truper",
+            "categoria": "X",
+            "categoria_ml": "X",
+            "estado": "publicado",
+            "vendible": True,
+            "plazo_envio": None,
+            "caracteristicas": [],
+            "product_attributes": "no-es-lista",
+            "product_images": [{"url": "https://www.truper.com/media/c.jpg", "orden": "no"}],
+            "product_variants": [
+                {
+                    "id": "var-roto",
+                    "clave": "ROTO",
+                    "descripcion": "precio ilegible",
+                    "precio_distribuidor": "12.345,00",
+                    "porcentaje_kobber": None,
+                    "estado": "activo",
+                }
+            ],
+        }
+        self.memory.tables["products"].extend([bueno, roto])
+        self.memory.tables["product_variants"].append({
+            "id": "var-off",
+            "product_id": "prod-numerico",
+            "clave": "DG-OFF",
+            "precio_distribuidor": 1000,
+            "porcentaje_kobber": 30,
+            "estado": "descontinuado",
+            "products": {"nombre": "Precio numérico", "marca": "Truper", "estado": "publicado", "vendible": True},
+        })
+        store.clear_store_cache()
+        res = self.client.get("/api/store/productos?page=1&page_size=24")
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        ids = [p["id"] for p in body["productos"]]
+        self.assertIn("prod-numerico", ids)
+        self.assertNotIn("prod-roto", ids)
+        publicado = next(p for p in body["productos"] if p["id"] == "prod-numerico")
+        self.assertEqual([v["clave"] for v in publicado["variantes"]], ["DG-OK"])
+        self.assertEqual(publicado["precio"], precio_venta("4300.00", "30.00"))
+        pedido = self.client.post("/api/store/pedidos", json=_pedido("var-off", 1))
+        self.assertEqual(pedido.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()
