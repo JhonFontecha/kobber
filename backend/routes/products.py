@@ -27,6 +27,9 @@ class ProductUpdate(BaseModel):
     caracteristicas: Optional[list[str]] = None
     estado:          Optional[str]       = None
     categoria_ml:    Optional[str]       = None
+    # False = no se publica en la tienda. No es inventario.
+    vendible:        Optional[bool]      = None
+    plazo_envio:     Optional[str]       = None
 
 
 class VariantCreate(BaseModel):
@@ -55,6 +58,8 @@ class VariantUpdate(BaseModel):
     porcentaje_ml:       Optional[float] = None
     # Precio de venta anterior REAL (IVA incluido). Vacío = el producto no está en oferta.
     precio_anterior:     Optional[float] = None
+    # Unidades físicas en bodegas Mercado Libre Full. No sale en la tienda.
+    stock_full:          Optional[int]   = None
     estado:              Optional[str]   = None
 
 
@@ -95,22 +100,31 @@ def _search_variants_by_codes(db, codes: list[str]):
 
 
 _OFFERS_COL: Optional[bool] = None
+_FULL_COL: Optional[bool] = None
 
 
 def _product_select(db) -> str:
     """Incluye precio_anterior solo si la migración ya se aplicó."""
     global _OFFERS_COL
+    global _FULL_COL
     if _OFFERS_COL is None:
         try:
             db.table("product_variants").select("precio_anterior").limit(1).execute()
             _OFFERS_COL = True
         except Exception:
             _OFFERS_COL = False
+    if _FULL_COL is None:
+        try:
+            db.table("product_variants").select("stock_full").limit(1).execute()
+            _FULL_COL = True
+        except Exception:
+            _FULL_COL = False
     offer = ", precio_anterior" if _OFFERS_COL else ""
+    full = ", stock_full" if _FULL_COL else ""
     return (
         "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
         "nc, unidades_caja, stock, stock_ml, porcentaje_kobber, porcentaje_ml"
-        f"{offer}, estado), "
+        f"{offer}{full}, estado), "
         "product_images(id, url, orden, variant_id)"
     )
 
@@ -369,6 +383,48 @@ def add_variant(product_id: str, body: VariantCreate):
         **body.model_dump(exclude_none=True),
     }).execute()
     return result.data[0]
+
+
+class StockFullMove(BaseModel):
+    delta: int
+    nota: Optional[str] = None
+
+
+@router.post("/variants/{variant_id}/stock-full")
+def ajustar_stock_full(variant_id: str, body: StockFullMove):
+    """Suma o resta unidades físicas en Mercado Libre Full y deja el movimiento."""
+    if body.delta == 0:
+        raise HTTPException(status_code=400, detail="El ajuste no puede ser cero.")
+    db = get_client()
+    try:
+        rows = (
+            db.table("product_variants")
+            .select("id, stock_full")
+            .eq("id", variant_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Falta aplicar la migración de inventario Full.")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Variante no encontrada")
+    actual = int(rows[0].get("stock_full") or 0)
+    nuevo = actual + int(body.delta)
+    if nuevo < 0:
+        raise HTTPException(status_code=400, detail="El inventario Full no puede quedar negativo.")
+    try:
+        db.table("product_variants").update({"stock_full": nuevo}).eq("id", variant_id).execute()
+        db.table("ml_stock_movements").insert({
+            "variant_id": variant_id,
+            "delta": int(body.delta),
+            "stock_despues": nuevo,
+            "nota": (body.nota or "").strip() or None,
+        }).execute()
+    except Exception:
+        raise HTTPException(status_code=503, detail="No se pudo registrar el movimiento de inventario Full.")
+    return {"stock_full": nuevo}
 
 
 @router.patch("/variants/{variant_id}")

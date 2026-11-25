@@ -20,7 +20,6 @@ export default function CatalogoPage({ searchQuery = '', onQuickView }) {
     marcas: [],
     precioMin: '',
     precioMax: '',
-    soloStock: false,
   })
   const [orden, setOrden] = useState('nombre')
   const [page, setPage] = useState(1)
@@ -42,7 +41,6 @@ export default function CatalogoPage({ searchQuery = '', onQuickView }) {
     marcas: filtros.marcas,
     minPrice: filtros.precioMin,
     maxPrice: filtros.precioMax,
-    soloStock: filtros.soloStock,
     orden,
     page,
     pageSize: 24,
@@ -53,10 +51,10 @@ export default function CatalogoPage({ searchQuery = '', onQuickView }) {
     setPage(1)
   }
   const resetFiltros = () => {
-    setFiltros({ categorias: [], marcas: [], precioMin: '', precioMax: '', soloStock: false })
+    setFiltros({ categorias: [], marcas: [], precioMin: '', precioMax: '' })
     setPage(1)
   }
-  const hasFilters = filtros.categorias.length || filtros.marcas.length || filtros.precioMin || filtros.precioMax || filtros.soloStock
+  const hasFilters = filtros.categorias.length || filtros.marcas.length || filtros.precioMin || filtros.precioMax
 
   const titulo = searchQuery ? `Resultados para “${searchQuery}”` : 'Catálogo'
 
@@ -115,12 +113,6 @@ export default function CatalogoPage({ searchQuery = '', onQuickView }) {
         </div>
       </fieldset>
 
-      <label className="flex items-center gap-2.5 cursor-pointer">
-        <input type="checkbox" checked={filtros.soloStock}
-          onChange={e => { setFiltros(f => ({ ...f, soloStock: e.target.checked })); setPage(1) }}
-          className="w-4 h-4 accent-[#C2622E] rounded" />
-        <span className="text-sm text-graphite-700">Solo con stock</span>
-      </label>
     </div>
   )
 
@@ -128,7 +120,7 @@ export default function CatalogoPage({ searchQuery = '', onQuickView }) {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 min-w-0">
       <Seo
         title={titulo}
-        description="Catálogo de ferretería Kobber. Precios finales con IVA incluido. Filtrá por categoría, marca y stock."
+        description="Catálogo de ferretería Kobber. Precios finales con IVA incluido. Filtrá por categoría y marca."
         path="/tienda/catalogo"
       />
 

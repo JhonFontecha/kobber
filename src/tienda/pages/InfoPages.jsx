@@ -49,8 +49,8 @@ export function TerminosPage() {
       </p>
       <h2 className="text-base font-bold text-graphite-900 pt-2">Disponibilidad</h2>
       <p>
-        Solo se puede pedir lo que tiene stock. Si un producto figura agotado, no se puede comprar. El stock
-        que ves es el que está cargado: no se completa con unidades ficticias.
+        Los productos publicados figuran como disponibles, con el plazo de envío que muestra la ficha.
+        Si un producto deja de ofrecerse, desaparece del catálogo.
       </p>
       <h2 className="text-base font-bold text-graphite-900 pt-2">Ofertas</h2>
       <p>

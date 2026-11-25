@@ -27,14 +27,8 @@ services:
         value: "15000"
       - key: KOBBER_ENVIO_GRATIS_DESDE
         value: "200000"
-      # Opcionales. Si no se definen, el login del panel en este servidor queda cerrado.
-      # La contraseña del panel vive en la Mac del Publicador; no hace falta repetirla acá.
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: AUTH_SECRET
-        sync: false
+      - key: KOBBER_PLAZO_ENVIO
+        value: "Envío en 3 a 5 días hábiles"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY

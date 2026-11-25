@@ -113,7 +113,8 @@ export default function ProductQuickModal({ productoId, onClose }) {
                   <span className="text-sm text-graphite-600 line-through">{fmt(variante.precio_anterior)}</span>
                 )}
               </div>
-              <p className="text-xs text-graphite-600 -mt-2">IVA incluido</p>
+              <p className="text-xs text-graphite-600 -mt-2">Disponible · IVA incluido</p>
+              {producto.plazo_envio && <p className="text-xs text-graphite-600 -mt-2">{producto.plazo_envio}</p>}
 
               {producto.variantes.length > 1 && (
                 <div>
@@ -137,15 +138,13 @@ export default function ProductQuickModal({ productoId, onClose }) {
               )}
 
               <div className="flex items-center gap-2 text-xs">
-                <span className={`w-2 h-2 rounded-full ${(variante?.stock ?? 0) > 0 ? 'bg-green-600' : 'bg-red-600'}`} />
-                <span className="text-graphite-700">
-                  {(variante?.stock ?? 0) > 0 ? `${variante.stock} disponibles` : 'Sin stock'}
-                </span>
+                <span className="w-2 h-2 rounded-full bg-green-600" />
+                <span className="text-graphite-700">Disponible</span>
               </div>
 
               <div className="flex flex-col gap-2 mt-auto">
-                <button type="button" onClick={handleAdd}
-                  disabled={!variante || (variante?.stock ?? 0) === 0}
+                  <button type="button" onClick={handleAdd}
+                  disabled={!variante}
                   className="w-full flex items-center justify-center gap-2 py-2.5 bg-kobber-500 text-white
                              font-semibold rounded-lg hover:bg-kobber-600 transition-colors
                              disabled:opacity-40 disabled:cursor-not-allowed">

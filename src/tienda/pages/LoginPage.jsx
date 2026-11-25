@@ -57,7 +57,7 @@ export default function LoginPage() {
           </div>
           <h1 className="text-2xl font-bold text-graphite-900">Acceso al panel</h1>
           <p className="text-sm text-graphite-600 mt-1">
-            Solo para el equipo interno. Para comprar no hace falta una cuenta.
+            Cuenta de administrador. Para comprar no hace falta registrarse.
           </p>
         </div>
 

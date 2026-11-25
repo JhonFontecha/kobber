@@ -13,13 +13,12 @@ export default function ProductCard({ producto, onQuickView }) {
   const precio = variante?.precio_venta ?? producto.precio ?? 0
   const precioAnt = variante?.precio_anterior ?? producto.precio_anterior ?? null
   const descuento = variante?.descuento ?? producto.descuento ?? 0
-  const stock = variante?.stock ?? producto.stock_total ?? 0
-  const agotado = stock <= 0
+  const plazo = producto.plazo_envio
 
   const handleAdd = (e) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!variante?.id || agotado) return
+    if (!variante?.id) return
     addItem({
       id: `${producto.id}-${variante.id}`,
       productId: producto.id,
@@ -59,11 +58,6 @@ export default function ProductCard({ producto, onQuickView }) {
               -{descuento}%
             </span>
           )}
-          {stock > 0 && stock <= 10 && (
-            <span className="bg-amber-50 text-graphite-800 text-[11px] font-bold px-2 py-0.5 rounded">
-              Últimas {stock}
-            </span>
-          )}
         </div>
 
         {onQuickView && (
@@ -96,16 +90,15 @@ export default function ProductCard({ producto, onQuickView }) {
             <span className="text-xs text-graphite-600 line-through">{fmt(precioAnt)}</span>
           )}
         </div>
-        <p className="text-[11px] text-graphite-600 mt-0.5">IVA incluido</p>
+        <p className="text-[11px] text-graphite-700 mt-0.5">Disponible · IVA incluido</p>
+        {plazo && <p className="text-[11px] text-graphite-600">{plazo}</p>}
 
-        <button type="button" onClick={handleAdd} disabled={agotado || !variante?.id}
-          className={`mt-3 w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold
-                      rounded-md transition-all duration-150 active:scale-95
-                      ${agotado
-                        ? 'bg-graphite-100 text-graphite-600 cursor-not-allowed'
-                        : 'bg-kobber-500 text-white hover:bg-kobber-600'}`}>
+        <button type="button" onClick={handleAdd} disabled={!variante?.id}
+          className="mt-3 w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold
+                     rounded-md transition-all duration-150 active:scale-95
+                     bg-kobber-500 text-white hover:bg-kobber-600 disabled:opacity-40">
           <ShoppingCart size={13} aria-hidden="true" />
-          {agotado ? 'Agotado' : 'Agregar'}
+          Agregar
         </button>
       </div>
     </article>

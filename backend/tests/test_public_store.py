@@ -75,11 +75,16 @@ class PublicStoreTests(unittest.TestCase):
         self.assertNotIn("precio_dist", texto)
         self.assertNotIn("9600", texto)
         self.assertNotIn('"nc"', texto)
+        self.assertNotIn("stock_total", texto)
+        self.assertNotIn("agotado", texto)
+        self.assertNotIn("stock_full", texto)
 
         aceite = next(p for p in normal.json()["productos"] if p["id"] == "prod-aceite")
         self.assertEqual(aceite["precio"], 12480)
         self.assertIsNone(aceite["precio_anterior"])
-        self.assertEqual(aceite["stock_total"], 4)
+        self.assertTrue(aceite["disponible"])
+        self.assertIn("días hábiles", aceite["plazo_envio"])
+        self.assertNotIn("stock", aceite["variantes"][0])
         self.assertTrue(aceite["imagen"].startswith("https://www.truper.com/"))
         # La lista no arrastra la descripción larga.
         self.assertNotIn("descripcion", aceite)
@@ -87,7 +92,7 @@ class PublicStoreTests(unittest.TestCase):
         sin_foto = next(p for p in normal.json()["productos"] if p["id"] == "prod-sinfoto")
         self.assertIsNone(sin_foto["imagen"])
         self.assertEqual(sin_foto["precio"], precio_venta(5000, None))
-        self.assertTrue(sin_foto["agotado"])
+        self.assertTrue(sin_foto["disponible"])
 
     def test_oferta_solo_si_hay_precio_anterior(self):
         res = self.client.get("/api/store/productos", params={"en_oferta": "true", "page_size": 10})
@@ -149,18 +154,33 @@ class PublicStoreTests(unittest.TestCase):
         )
         self.assertEqual(ajeno.status_code, 404)
 
-    def test_rechaza_tarjeta_stock_y_metodo_desconocido(self):
+    def test_rechaza_tarjeta_y_vende_sin_inventar_stock(self):
         tarjeta = _pedido()
         tarjeta["tarjeta"] = {"numero": "4111111111111111", "cvv": "123"}
         res = self.client.post("/api/store/pedidos", json=tarjeta)
         self.assertEqual(res.status_code, 400)
         self.assertEqual(self.memory.tables["orders"], [])
 
+        # stock 0 no bloquea: la tienda no publica inventario.
         sin_stock = self.client.post("/api/store/pedidos", json=_pedido("var-sinfoto", 1))
-        self.assertEqual(sin_stock.status_code, 409)
+        self.assertEqual(sin_stock.status_code, 200, sin_stock.text)
+        self.assertEqual(sin_stock.json()["totales"]["subtotal"], precio_venta(5000, None))
 
         otro = self.client.post("/api/store/pedidos", json=_pedido(metodo_pago="tarjeta"))
         self.assertEqual(otro.status_code, 400)
+
+    def test_descontinuado_no_se_lista_ni_se_vende(self):
+        for product in self.memory.tables["products"]:
+            if product["id"] == "prod-sinfoto":
+                product["vendible"] = False
+        for row in self.memory.tables["product_variants"]:
+            if row["id"] == "var-sinfoto":
+                row["products"]["vendible"] = False
+        store.clear_store_cache()
+        listed = [p["id"] for p in self.client.get("/api/store/productos").json()["productos"]]
+        self.assertNotIn("prod-sinfoto", listed)
+        pedido = self.client.post("/api/store/pedidos", json=_pedido("var-sinfoto", 1))
+        self.assertEqual(pedido.status_code, 400)
 
     def test_envio_gratis_sobre_el_umbral(self):
         # 20 unidades * 12480 = 249600, por encima de 200000.
@@ -178,27 +198,37 @@ class PublicStoreTests(unittest.TestCase):
         otra = self.client.get("/api/store/imagen", params={"src": "https://example.com/media/a.jpg", "w": 480})
         self.assertEqual(otra.status_code, 400)
 
-    def test_auth_sin_clave_por_defecto(self):
-        with mock.patch.dict(os.environ, {"ADMIN_EMAIL": "", "ADMIN_PASSWORD": "", "ADMIN_PASSWORD_SHA256": "", "AUTH_SECRET": ""}, clear=False):
-            cerrado = self.client.post("/api/auth/login", json={"email": "admin@kobber.com", "password": "1234"})
-            self.assertEqual(cerrado.status_code, 503)
+    def test_auth_exige_rol_admin_en_supabase(self):
+        from supabase_auth import AuthError
 
-        with mock.patch.dict(os.environ, {
-            "ADMIN_EMAIL": "dueno@example.com",
-            "ADMIN_PASSWORD": "clave-larga-de-prueba",
-            "ADMIN_PASSWORD_SHA256": "",
-            "AUTH_SECRET": "secreto-de-prueba",
-        }, clear=False):
-            mal = self.client.post("/api/auth/login", json={"email": "admin@kobber.com", "password": "1234"})
-            self.assertEqual(mal.status_code, 401)
-            bien = self.client.post("/api/auth/login", json={"email": "dueno@example.com", "password": "clave-larga-de-prueba"})
+        def fake_sign_in(email, password):
+            if email == "admin@example.com" and password == "correcta":
+                return {"token": "token-admin", "email": email, "role": "admin"}
+            if email == "persona@example.com":
+                raise AuthError(403, "Esta cuenta no tiene acceso al panel.")
+            raise AuthError(401, "Correo o contraseña incorrectos.")
+
+        def fake_current(token):
+            if token == "token-admin":
+                return {"email": "admin@example.com", "sub": "user-1", "role": "admin"}
+            raise AuthError(401, "Sesión no válida.")
+
+        with mock.patch("routes.auth.sign_in", fake_sign_in), mock.patch("routes.auth.current_admin", fake_current):
+            viejo = self.client.post("/api/auth/login", json={"email": "admin@kobber.com", "password": "1234"})
+            self.assertEqual(viejo.status_code, 401)
+            ajeno = self.client.post("/api/auth/login", json={"email": "persona@example.com", "password": "otra"})
+            self.assertEqual(ajeno.status_code, 403)
+            bien = self.client.post("/api/auth/login", json={"email": "admin@example.com", "password": "correcta"})
             self.assertEqual(bien.status_code, 200, bien.text)
-            token = bien.json()["token"]
-            me = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(bien.json()["token"], "token-admin")
+            me = self.client.get("/api/auth/me", headers={"Authorization": "Bearer token-admin"})
             self.assertEqual(me.status_code, 200)
-            self.assertEqual(me.json()["email"], "dueno@example.com")
-            self.assertNotIn("1234", bien.text)
-            self.assertNotIn("clave-larga", bien.text)
+            self.assertEqual(me.json()["email"], "admin@example.com")
+            self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
+
+        with mock.patch("config.SUPABASE_URL", ""), mock.patch("config.SUPABASE_KEY", ""):
+            cerrado = self.client.post("/api/auth/login", json={"email": "admin@example.com", "password": "correcta"})
+            self.assertEqual(cerrado.status_code, 503)
 
 
 if __name__ == "__main__":

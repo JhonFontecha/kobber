@@ -27,6 +27,7 @@ def settings() -> dict:
         "envio": int(os.getenv("KOBBER_ENVIO_COSTO", "15000")),
         "envio_gratis_desde": int(os.getenv("KOBBER_ENVIO_GRATIS_DESDE", "200000")),
         "iva": float(os.getenv("KOBBER_IVA", str(IVA_DEFAULT))),
+        "plazo_envio": os.getenv("KOBBER_PLAZO_ENVIO", "Envío en 3 a 5 días hábiles"),
     }
 
 

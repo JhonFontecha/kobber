@@ -160,7 +160,7 @@ export default function ProductDetailPage() {
                 <span className="text-base text-graphite-600 line-through">{fmt(anterior)}</span>
               )}
             </div>
-            <p className="text-xs text-kobber-800 mt-1">IVA incluido · El envío se calcula al confirmar el pedido</p>
+            <p className="text-xs text-kobber-800 mt-1">IVA incluido · {producto.plazo_envio || 'El envío se calcula al confirmar el pedido'}</p>
           </div>
 
           {producto.variantes.length > 1 && (
@@ -184,15 +184,13 @@ export default function ProductDetailPage() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${(variante?.stock ?? 0) > 10 ? 'bg-green-600' : (variante?.stock ?? 0) > 0 ? 'bg-amber-500' : 'bg-red-600'}`} />
-            <span className="text-sm text-graphite-700">
-              {(variante?.stock ?? 0) > 10 ? 'En stock' : (variante?.stock ?? 0) > 0 ? `Últimas ${variante.stock} unidades` : 'Sin stock'}
-            </span>
+            <span className="w-2.5 h-2.5 rounded-full bg-green-600" />
+            <span className="text-sm text-graphite-700">Disponible</span>
             {variante?.clave && <span className="text-xs text-graphite-600">Ref: {variante.clave}</span>}
           </div>
 
           <button type="button" onClick={handleAdd}
-            disabled={!variante || (variante?.stock ?? 0) === 0}
+            disabled={!variante}
             className={`w-full flex items-center justify-center gap-2 py-3.5 font-semibold rounded-xl
                        text-base transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed
                        ${added ? 'bg-green-700 text-white' : 'bg-kobber-500 text-white hover:bg-kobber-600 active:scale-[0.98]'}`}>

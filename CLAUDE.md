@@ -72,15 +72,11 @@ SUPABASE_KEY=...          # anon key
 SUPABASE_SERVICE_KEY=...  # service_role key — requerida para bypassear RLS
 STORAGE_PATH=./storage    # legado de la era SQLite, ya casi no se usa
 
-# Panel admin (no hay clave por defecto; sin esto /admin redirige al login y el login responde 503)
-ADMIN_EMAIL=...
-ADMIN_PASSWORD=...        # o ADMIN_PASSWORD_SHA256 (hex sha256, sin la clave en claro)
-AUTH_SECRET=...           # firma el token de sesión; string largo al azar
-
 # Tienda (opcionales; estos son los defaults)
 # KOBBER_MARGEN_DEFAULT=30
 # KOBBER_ENVIO_COSTO=15000
 # KOBBER_ENVIO_GRATIS_DESDE=200000
+# KOBBER_PLAZO_ENVIO=Envío en 3 a 5 días hábiles
 # KOBBER_ENV=development    # en local deja /docs abierto; en Render es production y los apaga
 ```
 
@@ -101,7 +97,7 @@ con `/docs` apagado cuando `KOBBER_ENV` no es `development` (en Render queda en 
 | `images.py` | `/api/images` | Trae imágenes de producto desde Truper.com (URL directa + scraping de BancoContenidoDigital) |
 | `analyzer.py` | `/api/analyzer` | Llena plantillas ML en blanco con datos de la BD; detecta layout de columnas ML dinámicamente por hoja; automatiza login/scraping de ML vía Playwright |
 | `store.py` | `/api/store` | Tienda pública: catálogo paginado sin costo, pedidos, imagen redimensionada, sitemap |
-| `auth.py` | `/api/auth` | Login del panel. Compara contra `ADMIN_EMAIL` + `ADMIN_PASSWORD` (o hash) y firma un token con `AUTH_SECRET` |
+| `auth.py` | `/api/auth` | Login del panel contra Supabase Auth. Exige `app_metadata.role = "admin"` y el backend valida el JWT con `get_user` |
 
 **Funciones compartidas clave:**
 - `catalog.get_ml_category(nombre)` — llama la API `domain_discovery` de ML para asignar `categoria_ml`
@@ -117,10 +113,13 @@ llamó sólo a `/api/store/productos`.
 Tablas principales: `products`, `product_variants`, `product_attributes`, `product_images`,
 `orders`, `order_items`.
 
-La migración `supabase/migrations/20261125120000_store_orders_and_offers.sql` crea los pedidos
-y la columna `product_variants.precio_anterior`. Hay que aplicarla a mano en Supabase; el código
-de la tienda sigue sirviendo el catálogo si la columna todavía no existe (las ofertas quedan vacías)
-y el checkout responde 503 hasta que exista `orders`.
+`supabase/migrations/20261125120000_store_orders_and_offers.sql` crea los pedidos y
+`product_variants.precio_anterior` (ya aplicada en producción).
+`supabase/migrations/20261125180000_vendible_plazo_stock_full.sql` agrega `products.vendible`,
+`products.plazo_envio`, `product_variants.stock_full` y `ml_stock_movements`. Hasta aplicarla,
+la tienda trata todo como vendible con el plazo por defecto y el panel no puede ajustar el inventario Full.
+Las fotos que faltaban y sí se pudieron confirmar están en `scripts/backfill_imagenes_faltantes.sql`
+(es dato, no esquema; correrlo es opcional y no pisa URLs existentes).
 
 - `products.categoria_ml` guarda el nombre de categoría ML (ej. `"Mandriles"`), usado para rutear
   productos a la hoja correcta de la plantilla ML. Correr `POST /api/products/backfill-categoria-ml`
@@ -136,8 +135,11 @@ y el checkout responde 503 hasta que exista `orders`.
   escribe el backend con la service role. No se guardan datos de tarjeta. Métodos actuales:
   `contra_entrega` y `transferencia` (`pago_estado=pendiente`). Una pasarela se enchufa en
   `store_pricing.PASARELAS` sin cobrar en el formulario.
-- `product_variants.stock` = stock real (físico); `product_variants.stock_ml` = stock que se manda
-  al Excel de ML, independiente del real (default 100 a nivel de columna). Igual con el margen:
+- La tienda no muestra ni usa `product_variants.stock`. Un producto publicado está "Disponible"
+  y lleva un plazo (`products.plazo_envio`, o `KOBBER_PLAZO_ENVIO` si está vacío). `products.vendible = false`
+  lo saca del catálogo. `stock` sigue existiendo para el publicador; `stock_ml` es la cantidad que va
+  al Excel de ML. `stock_full` y `ml_stock_movements` son el inventario físico en bodegas Mercado Libre
+  Full: solo el panel (`POST /api/products/variants/{id}/stock-full`), nunca la tienda. Igual con el margen:
   `porcentaje_kobber` (tienda pública) y `porcentaje_ml` (Excel de ML) son columnas separadas y
   persistentes por variante — antes el margen nunca se guardaba, se pasaba como parámetro en cada
   request. `fill_blank_template` usa `porcentaje_ml` si está seteado, si no cae al query param
@@ -214,7 +216,7 @@ E-commerce con React Router + Zustand:
 - `store/cartStore.js` — carrito global con Zustand + persistencia en localStorage (`kobber-cart`); cada ítem lleva `variantId` para que el checkout no mande el precio
 - `hooks/useStoreProducts.js` — fetch paginado a `/api/store/productos` (búsqueda, categoría, marca, precio, stock, ofertas). No manda margen
 - `components/` — `Header`, `Footer`, `CartDrawer`, `ProductCard`, `ProductQuickModal`, `ProductImage` (proxy + placeholder), `Seo`, `SplashScreen`, `WhatsAppFloat`
-- `pages/LoginPage.jsx` — manda el correo y la contraseña a `POST /api/auth/login`. No hay clave en el bundle. En el build público no abre `/admin`
+- `pages/LoginPage.jsx` — manda el correo y la contraseña a `POST /api/auth/login`, que entra por Supabase Auth y solo acepta `app_metadata.role = "admin"`. No hay clave en el bundle. En el build público no abre `/admin`. Los routers de catálogo, productos, excel, imágenes y analyzer exigen ese JWT
 - `pages/CheckoutPage.jsx` — `POST /api/store/pedidos`. El total que se muestra al final es el del servidor. No pide tarjeta ni dice que se envió un correo
 - `pages/InfoPages.jsx` — términos, privacidad (Ley 1581), cookies, contacto, nosotros y rastreo de pedido. Los datos de empresa que no están confirmados quedan marcados como pendientes
 
@@ -270,6 +272,27 @@ hashes de Vite) y cabeceras de seguridad (CSP, `X-Frame-Options`, etc.) en `/*`.
 mismas cabeceras de seguridad y `Cache-Control` corto en el listado de productos. CORS del API
 público lista orígenes explícitos; no usa `*`.
 
+## Primer usuario admin
+
+El panel no tiene contraseña en el código. El backend acepta solo un usuario de Supabase Auth cuyo `app_metadata.role` sea `"admin"` (columna `auth.users.raw_app_meta_data`). No uses User Metadata: el usuario puede editarla.
+
+1. En el dashboard del proyecto: **Authentication → Users → Add user → Create new user**.
+2. Correo y contraseña. Activa **Auto Confirm User** para que pueda entrar sin un mail de confirmación.
+3. Crea el usuario.
+4. Abre **SQL Editor** y corre, con el correo real:
+
+```sql
+update auth.users
+set raw_app_meta_data =
+  coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+where email = 'tu-correo@ejemplo.com';
+```
+
+5. En la Mac, `backend/.env` ya tiene `SUPABASE_URL` y `SUPABASE_KEY` (la anon key). Con eso el login del panel llama a Supabase. No hace falta `ADMIN_EMAIL` ni `ADMIN_PASSWORD`.
+6. Entra en `/tienda/login` con ese correo y esa contraseña. Si el rol se cargó después de haber iniciado sesión, volvé a entrar: `get_user` lee el rol vigente.
+
+Para quitar el acceso, borra `"role":"admin"` de `raw_app_meta_data` o elimina el usuario en Authentication → Users.
+
 ## Convenciones importantes
 
 - **Separador de fotos**: ML requiere coma (`,`) entre URLs de imagen — no `|`. Todos los endpoints de generación de Excel usan `",".join(urls)`.
@@ -285,7 +308,7 @@ público lista orígenes explícitos; no usa `*`.
 
 ## Problemas conocidos / deuda técnica
 
-- El login del panel depende de `ADMIN_EMAIL`, `ADMIN_PASSWORD` (o `ADMIN_PASSWORD_SHA256`) y `AUTH_SECRET` en el backend. Sin esas variables el panel no abre: no hay clave de respaldo. El token no protege los endpoints de `products`/`catalog` del backend local; solo la pantalla.
+- El primer administrador se crea en el dashboard de Supabase, no con una variable de entorno. Ver "Primer usuario admin" más abajo. Un JWT ya emitido sigue valiendo hasta que vence aunque se borre el usuario; `get_user` rechaza el token si Auth lo invalida, pero no acorta la ventana de un access token todavía vigente.
 - `requirements.txt` pinea `Pillow==11.1.0` pero en la práctica se instala una versión más nueva porque la vieja falla al compilar desde fuente en Python 3.14/macOS (faltan headers de jpeg) — no es bloqueante, pero el pin está desactualizado.
 - `playwright` está en `requirements.txt`. En macOS 13 (Ventura) `playwright install chromium` **falla** —
   Playwright dejó de dar soporte a Chromium en ese OS — así que en todo el proyecto se usa el Google

@@ -42,7 +42,7 @@ _WIDTHS = (320, 480, 800, 1200)
 _IMAGE_HOST = "www.truper.com"
 _IMAGE_PREFIX = "/media/"
 
-_offers_col: bool | None = None
+_col_cache: dict[tuple[str, str], bool] = {}
 _cache_lock = threading.Lock()
 _cache: dict = {"exp": 0.0, "items": None, "categorias": None, "marcas": None}
 _fixture_store = None
@@ -50,13 +50,13 @@ _fixture_announced = False
 
 _VARIANT_BASE = (
     "id, product_id, clave, descripcion, precio_distribuidor, porcentaje_kobber, "
-    "stock, unidades_caja, estado"
+    "unidades_caja, estado"
 )
 
 
 def clear_store_cache():
-    global _offers_col, _fixture_store
-    _offers_col = None
+    global _fixture_store
+    _col_cache.clear()
     _fixture_store = None
     with _cache_lock:
         _cache.update(exp=0.0, items=None, categorias=None, marcas=None)
@@ -83,26 +83,37 @@ def _db():
     return get_client()
 
 
-def _has_ofertas(db) -> bool:
-    global _offers_col
-    if _offers_col is None:
+def _has_col(db, table: str, column: str) -> bool:
+    key = (table, column)
+    if key not in _col_cache:
         try:
-            db.table("product_variants").select("precio_anterior").limit(1).execute()
-            _offers_col = True
+            db.table(table).select(column).limit(1).execute()
+            _col_cache[key] = True
         except Exception:
-            _offers_col = False
-            log.info("product_variants.precio_anterior no existe todavía; las ofertas quedan vacías.")
-    return _offers_col
+            _col_cache[key] = False
+            log.info("%s.%s no existe todavía.", table, column)
+    return _col_cache[key]
 
 
 def _variant_cols(db) -> str:
-    if _has_ofertas(db):
-        return _VARIANT_BASE + ", precio_anterior"
-    return _VARIANT_BASE
+    cols = _VARIANT_BASE
+    if _has_col(db, "product_variants", "precio_anterior"):
+        cols += ", precio_anterior"
+    return cols
+
+
+def _product_extra(db) -> str:
+    extras = [col for col in ("vendible", "plazo_envio") if _has_col(db, "products", col)]
+    return (", " + ", ".join(extras)) if extras else ""
+
+
+def _plazo(row: dict) -> str:
+    propio = (row.get("plazo_envio") or "").strip()
+    return propio or settings()["plazo_envio"]
 
 
 def _public_variant(variant: dict, venta: int, anterior, descuento) -> dict:
-    """Campos de variante que sí puede ver la tienda. Sin costo ni datos internos."""
+    """Campos de variante que sí puede ver la tienda. Sin costo ni inventario."""
     return {
         "id": variant.get("id"),
         "clave": variant.get("clave"),
@@ -110,12 +121,13 @@ def _public_variant(variant: dict, venta: int, anterior, descuento) -> dict:
         "precio_venta": venta,
         "precio_anterior": anterior,
         "descuento": descuento,
-        "stock": int(variant.get("stock") or 0),
         "unidades_caja": variant.get("unidades_caja"),
     }
 
 
 def _build_item(row: dict) -> dict | None:
+    if row.get("vendible") is False:
+        return None
     variantes_raw = [v for v in (row.get("product_variants") or []) if v.get("estado") != "inactivo"]
     variantes = []
     for variant in variantes_raw:
@@ -151,7 +163,8 @@ def _build_item(row: dict) -> dict | None:
         "precio": primaria["precio_venta"],
         "precio_anterior": primaria["precio_anterior"],
         "descuento": primaria["descuento"],
-        "stock_total": sum(v["stock"] for v in variantes),
+        "disponible": True,
+        "plazo_envio": _plazo(row),
     }
 
 
@@ -166,8 +179,8 @@ def _list_payload(item: dict) -> dict:
         "precio_anterior": item["precio_anterior"],
         "descuento": item["descuento"],
         "imagen": item["imagen"],
-        "stock_total": item["stock_total"],
-        "agotado": item["stock_total"] <= 0,
+        "disponible": True,
+        "plazo_envio": item["plazo_envio"],
         "variantes": [
             {
                 "id": v["id"],
@@ -176,7 +189,6 @@ def _list_payload(item: dict) -> dict:
                 "precio_venta": v["precio_venta"],
                 "precio_anterior": v["precio_anterior"],
                 "descuento": v["descuento"],
-                "stock": v["stock"],
             }
             for v in item["variantes"]
         ],
@@ -203,7 +215,8 @@ def _load_catalog():
 
     db = _db()
     select = (
-        "id, nombre, descripcion, marca, categoria, categoria_ml, caracteristicas, "
+        "id, nombre, descripcion, marca, categoria, categoria_ml, caracteristicas"
+        f"{_product_extra(db)}, "
         f"product_variants({_variant_cols(db)}), "
         "product_images(url, orden), "
         "product_attributes(nombre, valor, unidad, variant_id)"
@@ -270,7 +283,6 @@ def list_productos(
     marca: list[str] = Query(default=[]),
     min_price: float | None = None,
     max_price: float | None = None,
-    solo_stock: bool = False,
     en_oferta: bool = False,
     orden: str = "nombre",
     page: int = 1,
@@ -292,8 +304,6 @@ def list_productos(
         filtered = [item for item in filtered if item["precio"] >= min_price]
     if max_price is not None:
         filtered = [item for item in filtered if item["precio"] <= max_price]
-    if solo_stock:
-        filtered = [item for item in filtered if item["stock_total"] > 0]
     if en_oferta:
         filtered = [item for item in filtered if item.get("descuento")]
 
@@ -439,7 +449,10 @@ def _public_order(order: dict, items: list[dict]) -> dict:
 
 
 def _load_variants(db, ids: list[str]) -> list[dict]:
-    cols = _variant_cols(db) + ", products(nombre, marca, estado)"
+    parent = "nombre, marca, estado"
+    if _has_col(db, "products", "vendible"):
+        parent += ", vendible"
+    cols = _variant_cols(db) + f", products({parent})"
     try:
         return db.table("product_variants").select(cols).in_("id", ids).execute().data or []
     except Exception:
@@ -487,12 +500,8 @@ async def crear_pedido(request: Request):
         parent = row.get("products") or {}
         if isinstance(parent, list):
             parent = parent[0] if parent else {}
-        if parent.get("estado") == "descartado":
+        if parent.get("estado") == "descartado" or parent.get("vendible") is False:
             raise HTTPException(status_code=400, detail="Hay un producto que ya no está disponible.")
-        stock = int(row.get("stock") or 0)
-        if stock < item.cantidad:
-            nombre = parent.get("nombre") or row.get("clave") or "un producto"
-            raise HTTPException(status_code=409, detail=f"No hay stock suficiente de {nombre}.")
         venta = precio_venta(row.get("precio_distribuidor"), row.get("porcentaje_kobber"))
         if venta is None:
             raise HTTPException(status_code=400, detail="Hay un producto sin precio de venta.")
