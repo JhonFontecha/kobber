@@ -123,7 +123,11 @@ Las fotos y las claves mal leídas del PDF están en dos scripts de datos, no de
 numérico y mismo precio de distribuidor, más las fotos de esas claves) y
 `scripts/backfill_imagenes_faltantes.sql` (solo fotos de claves que ya coincidían).
 `reports/conciliacion_pdf_catalogo.csv` cruza cada variante publicada con su fila del PDF.
-No incluye productos que estén en el PDF y no en la tienda. Ninguno de los dos SQL se aplica solo.
+No incluye productos que estén en el PDF y no en la tienda.
+`scripts/ajustar_dudosos_y_no_encontrados.sql` corre después de la migración de `vendible`
+y después de `corregir_claves_truper.sql`: el precio sale del PDF y las medidas de la ficha
+del banco Truper; lo ambiguo y lo que no está en el PDF se despublica. El resumen es
+`reports/ajustes_dudosos.csv`. Ninguno de estos SQL se aplica solo.
 `clave_ocr.normalizar_clave` reescribe, al importar un PDF, `I/` → `1/`
 y la `I` entre dos números → `X`. No toca otras letras. `order_items.clave` es el texto del
 pedido ya hecho y no se reescribe.
