@@ -119,9 +119,12 @@ Tablas principales: `products`, `product_variants`, `product_attributes`, `produ
 `products.plazo_envio`, `product_variants.stock_full` y `ml_stock_movements`. Hasta aplicarla,
 la tienda trata todo como vendible con el plazo por defecto y el panel no puede ajustar el inventario Full.
 Las fotos y las claves mal leídas del PDF están en dos scripts de datos, no de esquema:
-`scripts/corregir_claves_truper.sql` (actualiza `product_variants.clave` y agrega las fotos
-confirmadas) y `scripts/backfill_imagenes_faltantes.sql` (solo fotos de claves que ya coincidían).
-Ninguno se aplica solo. `clave_ocr.normalizar_clave` reescribe, al importar un PDF, `I/` → `1/`
+`scripts/corregir_claves_truper.sql` (solo claves confirmadas en el PDF impreso: mismo código
+numérico y mismo precio de distribuidor, más las fotos de esas claves) y
+`scripts/backfill_imagenes_faltantes.sql` (solo fotos de claves que ya coincidían).
+`reports/conciliacion_pdf_catalogo.csv` cruza cada variante publicada con su fila del PDF.
+No incluye productos que estén en el PDF y no en la tienda. Ninguno de los dos SQL se aplica solo.
+`clave_ocr.normalizar_clave` reescribe, al importar un PDF, `I/` → `1/`
 y la `I` entre dos números → `X`. No toca otras letras. `order_items.clave` es el texto del
 pedido ya hecho y no se reescribe.
 
