@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import init_storage
 from http_security import SecurityHeadersMiddleware
 from routes import analyzer, auth, catalog, excel, images, products, store
-from supabase_auth import require_admin
+from admin_auth import require_admin
 
 _admin = [Depends(require_admin)]
 

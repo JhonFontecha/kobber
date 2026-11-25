@@ -199,7 +199,7 @@ class PublicStoreTests(unittest.TestCase):
         self.assertEqual(otra.status_code, 400)
 
     def test_auth_exige_rol_admin_en_supabase(self):
-        from supabase_auth import AuthError
+        from admin_auth import AuthError
 
         def fake_sign_in(email, password):
             if email == "admin@example.com" and password == "correcta":

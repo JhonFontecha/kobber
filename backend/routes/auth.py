@@ -11,7 +11,7 @@ from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from supabase_auth import AuthError, current_admin, sign_in
+from admin_auth import AuthError, current_admin, sign_in
 
 router = APIRouter()
 
