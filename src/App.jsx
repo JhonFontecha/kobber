@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
+import { getAdminToken } from './auth'
 import logo from './assets/logo.png'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -15,14 +16,21 @@ async function parseError(r) {
   }
 }
 
+function adminFetch(path, options = {}) {
+  const headers = new Headers(options.headers || {})
+  const token = getAdminToken()
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  return fetch(path, { ...options, headers })
+}
+
 const api = {
   async get(path) {
-    const r = await fetch(path)
+    const r = await adminFetch(path)
     if (!r.ok) throw new Error(await parseError(r))
     return r.json()
   },
   async post(path, body) {
-    const r = await fetch(path, {
+    const r = await adminFetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -31,12 +39,12 @@ const api = {
     return r.json()
   },
   async postForm(path, formData) {
-    const r = await fetch(path, { method: 'POST', body: formData })
+    const r = await adminFetch(path, { method: 'POST', body: formData })
     if (!r.ok) throw new Error(await parseError(r))
     return r.json()
   },
   async patch(path, body) {
-    const r = await fetch(path, {
+    const r = await adminFetch(path, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -45,7 +53,7 @@ const api = {
     return r.json()
   },
   async delete(path) {
-    const r = await fetch(path, { method: 'DELETE' })
+    const r = await adminFetch(path, { method: 'DELETE' })
     if (!r.ok) throw new Error(await parseError(r))
     return r.json()
   },
@@ -349,7 +357,7 @@ function ImportTab({ onImported, onToast }) {
       const fd = new FormData()
       fd.append('file', file)
 
-      const response = await fetch('/api/catalog/extract', { method: 'POST', body: fd })
+      const response = await adminFetch('/api/catalog/extract', { method: 'POST', body: fd })
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
         throw new Error(err.detail || `Error ${response.status}`)
@@ -549,7 +557,7 @@ function ProductCard({
     setEnhancing(true)
     setEnhanceResult(null)
     try {
-      const r = await fetch(`/api/products/${p.id}/enhance`, { method: 'POST' })
+      const r = await adminFetch(`/api/products/${p.id}/enhance`, { method: 'POST' })
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error') }
       const data = await r.json()
       setEnhanceResult(data)
@@ -571,7 +579,7 @@ function ProductCard({
         atributos_nuevos: (enhanceResult.atributos_sugeridos || []).filter((_, i) => applyAttrs.includes(i)),
         titulos_por_variante: enhanceResult.titulos_por_variante || [],
       }
-      const r = await fetch(`/api/products/${p.id}/apply-enhance`, {
+      const r = await adminFetch(`/api/products/${p.id}/apply-enhance`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
@@ -1047,7 +1055,7 @@ function ProductsTab({ onToast }) {
     setRedescribing(true)
     setRedescProgress({ current: 0, total: 0, updated: 0, errors: 0, nombre: '' })
     try {
-      const res = await fetch('/api/products/redescribe-all', { method: 'POST' })
+      const res = await adminFetch('/api/products/redescribe-all', { method: 'POST' })
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
@@ -1095,7 +1103,7 @@ function ProductsTab({ onToast }) {
     setEnhancingId(productId)
     setEnhanceResult(null)
     try {
-      const r = await fetch(`/api/products/${productId}/enhance`, { method: 'POST' })
+      const r = await adminFetch(`/api/products/${productId}/enhance`, { method: 'POST' })
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error') }
       const data = await r.json()
       setEnhanceResult({ ...data, productId })
@@ -1117,7 +1125,7 @@ function ProductsTab({ onToast }) {
         atributos_nuevos: (enhanceResult.atributos_sugeridos || []).filter((_, i) => enhApplyAttrs.includes(i)),
         titulos_por_variante: enhanceResult.titulos_por_variante || [],
       }
-      const r = await fetch(`/api/products/${enhanceResult.productId}/apply-enhance`, {
+      const r = await adminFetch(`/api/products/${enhanceResult.productId}/apply-enhance`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
@@ -1172,7 +1180,7 @@ function ProductsTab({ onToast }) {
           porcentaje: variantPcts[v.id] ?? null,
         })),
       }))
-      const res = await fetch('/api/excel/generate-ml', {
+      const res = await adminFetch('/api/excel/generate-ml', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items }),
@@ -1240,13 +1248,24 @@ function ProductsTab({ onToast }) {
     setSaving(true)
     try {
       const { nombre, descripcion, marca, categoria, subcategoria, seccion, caracteristicas, estado } = draft
-      await api.patch(`/api/products/${draft.id}`, { nombre, descripcion, marca, categoria, subcategoria, seccion, caracteristicas, estado })
+      const productBody = { nombre, descripcion, marca, categoria, subcategoria, seccion, caracteristicas, estado }
+      if ('vendible' in draft) productBody.vendible = draft.vendible
+      if ('plazo_envio' in draft) productBody.plazo_envio = draft.plazo_envio || null
+      await api.patch(`/api/products/${draft.id}`, productBody)
+      const saved = products.find(p => p.id === draft.id)
       for (const v of (draft.product_variants || [])) {
         const fields = {}
         for (const k of ['clave', 'codigo', 'descripcion', 'precio_distribuidor', 'nc', 'unidades_caja',
-                          'stock', 'stock_ml', 'porcentaje_kobber', 'porcentaje_ml', 'estado'])
+                          'stock', 'stock_ml', 'porcentaje_kobber', 'porcentaje_ml', 'precio_anterior', 'estado'])
           if (v[k] !== undefined) fields[k] = v[k]
         if (Object.keys(fields).length) await api.patch(`/api/products/variants/${v.id}`, fields)
+        const before = (saved?.product_variants || []).find(x => x.id === v.id)
+        if (before && before.stock_full != null && v.stock_full != null && Number(v.stock_full) !== Number(before.stock_full)) {
+          await api.post(`/api/products/variants/${v.id}/stock-full`, {
+            delta: Number(v.stock_full) - Number(before.stock_full),
+            nota: 'Ajuste desde el panel',
+          })
+        }
       }
       setProducts(prev => prev.map(p => p.id === draft.id ? { ...p, ...draft } : p))
       cancelEdit()
@@ -1548,6 +1567,9 @@ function ProductsTab({ onToast }) {
                       <EditRow label="Subcategoría" style={{ flex: '1 1 140px' }}>
                         <EditInput value={draft.subcategoria} onChange={v => setField('subcategoria', v)} />
                       </EditRow>
+                      <EditRow label="Plazo en la tienda" style={{ flex: '1 1 180px' }}>
+                        <EditInput value={draft.plazo_envio ?? ''} onChange={v => setField('plazo_envio', v)} />
+                      </EditRow>
                       <EditRow label="Estado" style={{ flexShrink: 0 }}>
                         <select value={draft.estado || 'pendiente'} onChange={e => setField('estado', e.target.value)}
                           style={{ background: 'var(--bg)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-md)', padding: '6px 10px', fontSize: '12px', color: 'var(--text-primary)' }}>
@@ -1555,6 +1577,11 @@ function ProductsTab({ onToast }) {
                         </select>
                       </EditRow>
                     </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                      <input type="checkbox" checked={draft.vendible !== false}
+                        onChange={e => setField('vendible', e.target.checked)} />
+                      Se vende en la tienda
+                    </label>
 
                     {(draft.product_variants || []).length > 0 && (
                       <EditRow label={`Variantes (${draft.product_variants.length})`}>
@@ -1581,6 +1608,9 @@ function ProductsTab({ onToast }) {
                                   </EditRow>
                                   <EditRow label="Stock ML" style={{ flex: '0 1 80px' }}>
                                     <input type="number" value={v.stock_ml ?? ''} onChange={e => setVariantField(v.id, 'stock_ml', e.target.value === '' ? null : Number(e.target.value))} style={variantInputStyle} />
+                                  </EditRow>
+                                  <EditRow label="Unidades en ML Full" style={{ flex: '0 1 110px' }}>
+                                    <input type="number" min={0} value={v.stock_full ?? ''} onChange={e => setVariantField(v.id, 'stock_full', e.target.value === '' ? null : Number(e.target.value))} style={variantInputStyle} title="Inventario físico en bodegas de Mercado Libre Full. No se muestra en la tienda." />
                                   </EditRow>
                                 </div>
                                 {/* % de ganancia — Kobber (tienda) y ML (excel) por separado, persistentes */}
@@ -1612,6 +1642,17 @@ function ProductsTab({ onToast }) {
                                         → ${calcVenta(vDist, v.porcentaje_ml).toLocaleString()}
                                       </span>
                                     )}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }} title="Solo si ese precio se cobró de verdad. Vacío = sin oferta.">
+                                      Precio anterior:
+                                    </span>
+                                    <input
+                                      type="number" min={0}
+                                      value={v.precio_anterior ?? ''}
+                                      onChange={e => setVariantField(v.id, 'precio_anterior', e.target.value === '' ? null : Number(e.target.value))}
+                                      style={{ ...variantInputStyle, width: 90, textAlign: 'center' }}
+                                    />
                                   </div>
                                 </div>
                               </div>
@@ -2178,7 +2219,7 @@ function FlowTab({ onToast }) {
     setCategoriasListas(false)
     try {
       const product_ids = products.map(p => p.id)
-      const r = await fetch('/api/analyzer/download-template', {
+      const r = await adminFetch('/api/analyzer/download-template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ product_ids }),
@@ -2213,7 +2254,7 @@ function FlowTab({ onToast }) {
       fd.append('ml_file', file)
       fd.append('product_ids', JSON.stringify(products.map(p => p.id)))
       fd.append('product_stocks', JSON.stringify(productStocks))
-      const r = await fetch(`/api/analyzer/fill-blank-template?margen=${defaultPct || 0}`, { method: 'POST', body: fd })
+      const r = await adminFetch(`/api/analyzer/fill-blank-template?margen=${defaultPct || 0}`, { method: 'POST', body: fd })
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error') }
 
       const filas      = r.headers.get('X-Filas') || '?'
@@ -2813,7 +2854,7 @@ function AnalyzeTab({ onToast }) {
       const fd  = new FormData()
       fd.append('ml_file', mlFile)
       const pct = parseFloat(margen) || 0
-      const r   = await fetch(`/api/analyzer/fill-blank-template?margen=${pct}`, { method: 'POST', body: fd })
+      const r   = await adminFetch(`/api/analyzer/fill-blank-template?margen=${pct}`, { method: 'POST', body: fd })
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error') }
       const filas = r.headers.get('X-Filas') || '?'
       const hojas = r.headers.get('X-Hojas') || '?'
@@ -2906,7 +2947,20 @@ function AnalyzeTab({ onToast }) {
 
 // ── Main App ───────────────────────────────────────────────────────────────────
 
+function useAdminGate() {
+  const [state, setState] = useState('checking')
+  useEffect(() => {
+    const token = getAdminToken()
+    if (!token) { setState('anon'); return }
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => setState(r.ok ? 'ok' : 'anon'))
+      .catch(() => setState('anon'))
+  }, [])
+  return state
+}
+
 export default function App() {
+  const auth = useAdminGate()
   const [tab, setTab] = useState('flujo')
   const [stats, setStats] = useState(null)
   const [toast, setToast] = useState(null)
@@ -2925,6 +2979,15 @@ export default function App() {
   }
 
   const onToast = (msg) => setToast(msg)
+
+  if (auth === 'checking') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+        Verificando acceso…
+      </div>
+    )
+  }
+  if (auth !== 'ok') return <Navigate to="/tienda/login" replace />
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>

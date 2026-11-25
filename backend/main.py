@@ -1,10 +1,19 @@
-from fastapi import FastAPI
+import os
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import init_storage
-from routes import analyzer, catalog, excel, images, products, store
+from http_security import SecurityHeadersMiddleware
+from routes import analyzer, auth, catalog, excel, images, products, store
+from supabase_auth import require_admin
 
-app = FastAPI(title="Kobber API", version="0.2.0")
+_admin = [Depends(require_admin)]
+
+_is_prod = os.getenv("KOBBER_ENV", "development") == "production"
+_docs = {"docs_url": None, "redoc_url": None, "openapi_url": None} if _is_prod else {}
+
+app = FastAPI(title="Kobber API", version="0.2.0", **_docs)
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,6 +22,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.on_event("startup")
@@ -33,9 +43,10 @@ def health():
     return {"status": "ok"}
 
 
-app.include_router(catalog.router,   prefix="/api/catalog",   tags=["catalog"])
-app.include_router(products.router,  prefix="/api/products",  tags=["products"])
-app.include_router(excel.router,     prefix="/api/excel",     tags=["excel"])
-app.include_router(images.router,    prefix="/api/images",    tags=["images"])
-app.include_router(analyzer.router,  prefix="/api/analyzer",  tags=["analyzer"])
+app.include_router(catalog.router,   prefix="/api/catalog",   tags=["catalog"],  dependencies=_admin)
+app.include_router(products.router,  prefix="/api/products",  tags=["products"], dependencies=_admin)
+app.include_router(excel.router,     prefix="/api/excel",     tags=["excel"],    dependencies=_admin)
+app.include_router(images.router,    prefix="/api/images",    tags=["images"],   dependencies=_admin)
+app.include_router(analyzer.router,  prefix="/api/analyzer",  tags=["analyzer"], dependencies=_admin)
 app.include_router(store.router,     prefix="/api/store",     tags=["store"])
+app.include_router(auth.router,      prefix="/api/auth",      tags=["auth"])

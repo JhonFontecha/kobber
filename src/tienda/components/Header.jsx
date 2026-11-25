@@ -32,8 +32,8 @@ export default function Header({ onSearch }) {
         <div className="flex items-center h-16 gap-4">
 
           {/* Logo — recortado a la K con esquinas redondeadas */}
-          <Link to="/tienda" className="shrink-0">
-            <img src={logo} alt="Kobber" className="w-9 h-9 rounded-xl object-cover" />
+          <Link to="/tienda" className="shrink-0" aria-label="Inicio">
+            <img src={logo} alt="" width={36} height={36} className="w-9 h-9 rounded-xl object-cover" />
           </Link>
 
           {/* Nav desktop */}
@@ -50,8 +50,9 @@ export default function Header({ onSearch }) {
           {/* Search */}
           <form onSubmit={handleSearch} className="flex-1 max-w-xl mx-auto hidden sm:flex">
             <div className="relative w-full">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-400" />
-              <input type="text"
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-500" aria-hidden="true" />
+              <label htmlFor="busqueda" className="sr-only">Buscar en el catálogo</label>
+              <input id="busqueda" type="search"
                 placeholder="Buscar herramientas, marcas..."
                 value={searchVal}
                 onChange={e => setSearchVal(e.target.value)}
@@ -79,10 +80,10 @@ export default function Header({ onSearch }) {
 
             {/* Login */}
             <Link to="/tienda/login"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm text-graphite-500
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm text-graphite-600
                          hover:text-graphite-900 hover:bg-graphite-100 rounded-md transition-colors">
-              <User size={15} />
-              <span>Ingresar</span>
+              <User size={15} aria-hidden="true" />
+              <span>Panel</span>
             </Link>
 
             {/* Mobile toggle */}
@@ -97,8 +98,9 @@ export default function Header({ onSearch }) {
         {/* Mobile search */}
         <div className="sm:hidden pb-3">
           <form onSubmit={handleSearch} className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-400" />
-            <input type="text" placeholder="Buscar herramientas..."
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-graphite-500" aria-hidden="true" />
+            <label htmlFor="busqueda-movil" className="sr-only">Buscar en el catálogo</label>
+            <input id="busqueda-movil" type="search" placeholder="Buscar herramientas..."
               value={searchVal} onChange={e => setSearchVal(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-graphite-50 border border-graphite-200
                          rounded-lg focus:outline-none focus:border-kobber-500 text-graphite-900" />
@@ -119,7 +121,7 @@ export default function Header({ onSearch }) {
           <Link to="/tienda/login" onClick={() => setMobileOpen(false)}
             className="py-2.5 px-3 text-sm text-graphite-600 hover:text-graphite-900
                        hover:bg-graphite-100 rounded-md transition-colors flex items-center gap-2">
-            <User size={15} /> Ingresar
+            <User size={15} aria-hidden="true" /> Panel
           </Link>
         </div>
       )}

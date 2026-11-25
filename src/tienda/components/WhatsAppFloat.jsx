@@ -1,5 +1,4 @@
-const WA_NUMBER  = '573007187845'
-const WA_MESSAGE = 'Hola, necesito ayuda con un producto de Kobber 🛠️'
+import { whatsappHref } from '../lib/contact'
 
 const SvgWhatsApp = () => (
   <svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -8,11 +7,9 @@ const SvgWhatsApp = () => (
 )
 
 export default function WhatsAppFloat() {
-  const href = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`
-
   return (
     <a
-      href={href}
+      href={whatsappHref()}
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Chatea con nosotros por WhatsApp"

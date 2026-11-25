@@ -11,14 +11,18 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routes import store
+from http_security import SecurityHeadersMiddleware
+from routes import auth, store
 
-app = FastAPI(title="Kobber Store API", version="0.1.0")
+# En el servidor público los docs de OpenAPI quedan apagados. Para verlos en local:
+# KOBBER_ENV=development.
+_is_dev = os.getenv("KOBBER_ENV", "production") == "development"
+_docs = {} if _is_dev else {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
-# Orígenes permitidos separados por coma en la env var ALLOWED_ORIGINS (configurar en Render
-# una vez se conozca la URL real del static site) — localhost siempre permitido para poder
-# probar el frontend local contra este backend público.
-_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+app = FastAPI(title="Kobber Store API", version="0.2.0", **_docs)
+
+# Orígenes separados por coma en ALLOWED_ORIGINS. Nunca "*": va con credenciales.
+_default_origins = "https://kobber-tienda.onrender.com,http://localhost:5173,http://127.0.0.1:5173"
 allow_origins = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()
 ]
@@ -27,9 +31,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.get("/health")
@@ -38,3 +43,4 @@ def health():
 
 
 app.include_router(store.router, prefix="/api/store", tags=["store"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
