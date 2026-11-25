@@ -14,7 +14,7 @@
 -- ficha no trae la medida, se completa con el PDF y el comentario lo dice.
 --
 -- vendible es del producto entero. Si la familia tiene variantes que siguen
--- a la venta, solo la variante mala pasa a estado = 'inactivo' (la tienda
+-- a la venta, solo la variante mala pasa a estado = 'descontinuado' (la tienda
 -- no la muestra ni deja pedirla). Para volver a publicarla:
 --   update public.product_variants set estado = 'activo' where id = '...';
 -- Si todo el producto se apaga, se usa vendible = false. Para volver:
@@ -359,267 +359,267 @@ where v.id = 'a9d6732f-d8f2-4772-b979-2a59ae39fd81'
 -- 2. Variantes ambiguas o con el código repetido. La familia sigue publicada.
 -- código 17357, pág. no hallada. Alicates multiusos para electricista. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '74e7edb8-738a-41b8-adf3-32ae46008800'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 101500, pág. no hallada. Aspiradoras plásticas. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '880463f7-a02e-4f45-8d25-6a4dab12802e'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 103106, pág. no hallada. Básculas electrónicas grameras, 5 kg. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '0cad2fc4-5b33-4ed4-80d8-bb1a96a1206d'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 27119, pág. no hallada. Básculas electrónicas multifunciones (PRETUL). El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '749a917a-7d02-45df-a908-6b0d6b256903'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 9576, pág. no hallada. Berbiquí profesional 12". El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'b003fa91-c365-4eef-9ad2-84fe8e8571d8'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 12111, pág. no hallada. Bombas periféricas 1/2 HP. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'ad534aea-d4dc-48ee-b8bb-0c801ca318d3'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 12113, pág. no hallada. Bombas periféricas 3/4 HP. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '2097d545-77e6-4bbb-81c2-f87999131182'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 16934, pág. no hallada. Bombas sumergibles para agua limpia, tipo bala 127 V. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'a024bf85-3b6e-4abc-a13a-14905969c8bc'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 88, pág. no hallada. Brocas escalonadas. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'a990c4c9-44f9-47c4-a104-f3363fdcd271'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 23532, pág. no hallada. Candados de hierro color latón, gancho corto. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '4011f0ca-b6a7-42c7-b01c-d085fb03ed4f'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43315, pág. 52. Candados de hierro con coraza. Página 52 imprime CH-38 a $7,600 y lo publicado es CHR-404 a $21,000. candado de hierro, gancho corto, medidas 38 mm.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '9e796566-6b6f-4538-b045-6945e53b81b4'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43315, pág. 52. Candados de hierro, gancho corto. Página 52 imprime CH-38 a $7,600 y lo publicado es CH-32 a $5,700. candado de hierro, gancho corto, medidas 38 mm.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '28c19fec-8ce2-47f0-be97-9d686b1e5cc5'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43337, pág. 52. Candados de hierro, gancho corto. Página 52 imprime CA-65LQ a $40,000 y lo publicado es CH-50 a $12,000. candado redondo 65 mm, gancho largo; 54 mm es la medida A del gancho.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'a684045b-b8f8-430a-9b8f-febba8f37be5'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43323, pág. 52. Candados de hierro, gancho largo. El código está en página 52 del PDF, pero la fila no se leyó. Publicado CH-3XL; banco CH-38L.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'f9d7956e-9e1f-40aa-a92a-9a4080053cc5'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43324, pág. 52. Candados de hierro, gancho largo. El código está en página 52 del PDF, pero la fila no se leyó. Publicado CH-4XL; banco CH-45L.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'e144336d-ed63-49e1-84bc-d1525203da18'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43325, pág. 52. Candados de hierro, gancho largo. El código está en página 52 del PDF, pero la fila no se leyó. Publicado CH-4XL; banco CH-50L.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'b2884bc5-a904-4132-9b9e-eb6a65e507b2'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43002, pág. 52. Candados de hierro, gancho largo. El código está en página 52 del PDF, pero la fila no se leyó. Publicado CH-5XL; banco sin ficha.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'ba0c49ca-6418-4d8a-a644-681d51f902e5'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 43002, pág. 52. Candados de hierro, gancho largo. El código está en página 52 del PDF, pero la fila no se leyó. Publicado CH-6XL; banco sin ficha.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '3b8d6fba-f2c4-4997-b431-370e75df34e1'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 23610, pág. 53. Cerrojos llave-llave, llave tradicional. El código está en página 53 del PDF, pero la fila no se leyó. Publicado CERO-42P; banco CERO-12P.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '0ce259a9-b321-49f0-b9be-2eea194cd070'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 23611, pág. 53. Cerrojos llave-llave, llave tradicional. El código está en página 53 del PDF, pero la fila no se leyó. Publicado CERO-02P; banco CERO-32P.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '0685207a-9a69-4e6e-98b1-55ccaf44f67f'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 23612, pág. 53. Cerrojos llave-mariposa, llave tradicional. El código está en página 53 del PDF, pero la fila no se leyó. Publicado CERO-21P; banco CERO-22P.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '38395433-f3dc-4ca5-81fe-dfc046e2e080'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 26067, pág. 53. Cerrojos llave-mariposa, llave tradicional. El código está en página 53 del PDF, pero la fila no se leyó. Publicado CERO-6P; banco CERO-61P.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '34d16946-56a5-44f3-9b06-db8d4b7df141'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 16963, pág. no hallada. Cuchillas de repuesto para bisturí, acero SK4. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'b098b227-8f66-4831-aa67-7aa43f60ffd9'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 100836, pág. 85. Destornilladores punta gabinete, empuñadura Comfort Grip. Página 85: el renglón de este código no quedó con clave y precio unívocos. El código está en página 85 del PDF, pero la fila no se leyó. Publicado DG-3/16I33B; 
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'a25ed90b-7be1-452a-9044-5361325ba907'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 10034, pág. no hallada. Destornilladores punta gabinete, empuñadura Comfort Grip. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '6c7bb2d3-e510-4a49-b53c-c10ee8a69cd1'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 100833, pág. 85. Destornilladores punta pala, empuñadura Comfort Grip. Página 85 imprime DR-1/4X8B a $7,900 y lo publicado es DR-1/4I6B a $7,500. pala Comfort Grip 1/4 x 8".
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '9ac0b6f3-58ef-4c09-adf1-7544f268575e'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 100833, pág. 85. Destornilladores punta phillips, empuñadura Comfort Grip. Página 85 imprime DR-1/4X8B a $7,900 y lo publicado es DP-3/16I3B a $4,500. pala Comfort Grip 1/4 x 8".
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '75eb5e15-6aa3-4afd-9880-53657524e9a0'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 100836, pág. 85. Destornilladores punta phillips, empuñadura Comfort Grip. Página 85: el renglón de este código no quedó con clave y precio unívocos. El código está en página 85 del PDF, pero la fila no se leyó. Publicado DP-3/16I4B; b
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '09cfe848-e36c-45e4-9957-e08099141323'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 14068, pág. no hallada. Destornilladores punta phillips, empuñadura Comfort Grip. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'b49b2c51-aa84-4231-b878-1dcd7f071064'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 14091, pág. no hallada. Destornilladores punta phillips, empuñadura Comfort Grip. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'd53474db-5705-43db-917e-755767cc7730'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 100834, pág. 85. Destornilladores punta phillips, empuñadura Comfort Grip. El código está en página 85 del PDF, pero la fila no se leyó. Publicado DP-3/8I4B; banco DR-3/8X8B.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '8577f551-b88f-490b-be9f-62d456c0103f'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 17420, pág. no hallada. Hombresolos mordazas curvas, palanca recubierta. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '7d571d1a-923a-4ffb-b7b7-b309cefc5d56'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 17429, pág. no hallada. Hombresolos mordazas curvas, palanca recubierta. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'a70d4e6f-791d-47ef-a597-29ac1cb48c48'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 17427, pág. no hallada. Hombresolos tipo "C", mordazas autoajustables. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'bb8db7fd-bfe4-48be-8164-fb4eebe46dce'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 10447, pág. no hallada. Inversores de corriente con puertos USB. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '213bbbe6-5174-4b5a-9efc-c61d10a1301e'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 22971, pág. no hallada. Juegos de alicates y llave expansiva. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'fff0f2b4-5de4-48ee-9bf9-803e0db3afb6'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 15533, pág. no hallada. Juegos de llaves bristol cortas, punta recta, organizador pl. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'e8022ad4-a54b-4a0a-beb2-e19df8b088f8'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 15530, pág. no hallada. Juegos de llaves bristol cortas, punta recta, organizador pl. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '68c04311-2adf-4bef-9592-2a774247213b'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 15554, pág. 141. La ficha y el PDF son TORX-9 a $16,000, y esa variante ya está en la familia torx. Se apaga este duplicado (ALL-9, texto en mm, $13,000).
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'bd259587-ee50-45fb-b0cc-587a47996e4c'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 17111, pág. no hallada. Limpiadores de carburador. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'eba6a2b4-1372-41d3-95b1-73fe74d4d387'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 7117, pág. no hallada. Motobombas de combustión de 4 tiempos, Ø 4", 3" y 2". El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '938a4b90-e5ab-4767-bf2c-df72561d5cb4'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 10402, pág. no hallada. Multitesters digitales. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = '9e8903bf-199f-421e-a5f2-f08927776a48'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 18335, pág. no hallada. Testers de tensión. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'e19dc1d0-5f90-4e95-b52d-5aff44690562'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- código 18333, pág. no hallada. Testers de tensión. El código no aparece en las páginas de producto ni en el índice numérico del PDF.
 update public.product_variants
-set estado = 'inactivo'
+set estado = 'descontinuado'
 where id = 'f9a0b706-ebbe-4775-b8da-927960b67279'
-  and estado is distinct from 'inactivo';
+  and estado is distinct from 'descontinuado';
 
 -- 3. Productos cuyas variantes publicadas no quedan ninguna. Se apaga el producto.
 -- códigos 16711, 16712. Aceites multiusos TRUPER
