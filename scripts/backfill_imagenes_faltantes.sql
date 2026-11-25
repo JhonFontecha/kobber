@@ -1,3 +1,6 @@
+-- Las claves que este archivo no corrige están en scripts/corregir_claves_truper.sql,
+-- que también inserta sus fotos. Correr los dos es seguro: ninguno pisa una URL existente.
+--
 -- Fotos para productos que la tienda pública tenía sin ninguna imagen.
 -- Generado el 2026-11-25 contra https://www.truper.com/banco-contenido-digital/mx
 -- NO es un cambio de esquema. Correr a mano en el SQL editor cuando quieras cargar las fotos.

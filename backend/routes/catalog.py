@@ -16,6 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
+from clave_ocr import normalizar_clave
 from config import ANTHROPIC_API_KEY
 from database import get_client
 
@@ -396,8 +397,13 @@ REGLAS CRÍTICAS PARA PRECIOS — LEE ESTO PRIMERO
    - La letra "S" vs el número "5"
    - La letra "Z" vs el número "2"
    - La letra "B" vs el número "8" (ej: clave real "MOTB-4" mal leída como "MOT8-4")
-   Copia el código EXACTAMENTE como aparece en el catálogo, carácter por carácter.
-   NUNCA adivines ni normalices un código — si dice "9X", escribe "9X", no "9I" ni "91".
+   En las claves de Truper hay dos casos que NO son la letra I:
+   - Entre dos medidas, el signo de "por" es la letra X. "1/4 x 6" se escribe "1/4X6",
+     nunca "1/4I6". Si el trazo parece una I entre números, es una X.
+   - Una fracción empieza con el dígito 1, no con la letra I. "7-1/4" no es "7-I/4".
+   Copia el resto del código EXACTAMENTE como aparece, carácter por carácter.
+   Al guardar, el importador reescribe solo esos dos casos (I/ → 1/ y la I entre
+   dos números → X). No reescribas otras letras por tu cuenta.
 
 7. PULGADAS: en "nombre" y "descripcion" (familia y variantes), si una medida va en
    pulgadas usa el símbolo " pegado al número, sin espacio entre el número y el símbolo
@@ -659,14 +665,14 @@ def _save_to_supabase(products_data: list) -> dict:
 
         # Índice clave → titulos para lookup O(1)
         titulos_idx = {
-            item["clave"]: item["titulos"]
+            normalizar_clave(item["clave"]): item["titulos"]
             for item in p.get("titulos_por_variante", [])
             if item.get("clave")
         }
 
         # Variantes y sus atributos
         for v in variantes:
-            clave = v.get("clave")
+            clave = normalizar_clave(v.get("clave")) if v.get("clave") else v.get("clave")
             vresult = db.table("product_variants").insert({
                 "product_id":          product_id,
                 "codigo":              v.get("codigo"),

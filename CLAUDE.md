@@ -118,8 +118,12 @@ Tablas principales: `products`, `product_variants`, `product_attributes`, `produ
 `supabase/migrations/20261125180000_vendible_plazo_stock_full.sql` agrega `products.vendible`,
 `products.plazo_envio`, `product_variants.stock_full` y `ml_stock_movements`. Hasta aplicarla,
 la tienda trata todo como vendible con el plazo por defecto y el panel no puede ajustar el inventario Full.
-Las fotos que faltaban y sí se pudieron confirmar están en `scripts/backfill_imagenes_faltantes.sql`
-(es dato, no esquema; correrlo es opcional y no pisa URLs existentes).
+Las fotos y las claves mal leídas del PDF están en dos scripts de datos, no de esquema:
+`scripts/corregir_claves_truper.sql` (actualiza `product_variants.clave` y agrega las fotos
+confirmadas) y `scripts/backfill_imagenes_faltantes.sql` (solo fotos de claves que ya coincidían).
+Ninguno se aplica solo. `clave_ocr.normalizar_clave` reescribe, al importar un PDF, `I/` → `1/`
+y la `I` entre dos números → `X`. No toca otras letras. `order_items.clave` es el texto del
+pedido ya hecho y no se reescribe.
 
 - `products.categoria_ml` guarda el nombre de categoría ML (ej. `"Mandriles"`), usado para rutear
   productos a la hoja correcta de la plantilla ML. Correr `POST /api/products/backfill-categoria-ml`
