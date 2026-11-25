@@ -5,7 +5,7 @@ const useCartStore = create(
   persist(
     (set, get) => ({
       items: [],
-      open:  false,
+      open: false,
 
       addItem(producto) {
         set(state => {
@@ -14,7 +14,7 @@ const useCartStore = create(
             return {
               items: state.items.map(i =>
                 i.producto.id === producto.id
-                  ? { ...i, cantidad: i.cantidad + 1 }
+                  ? { ...i, cantidad: i.cantidad + 1, producto: { ...i.producto, ...producto } }
                   : i
               ),
             }
@@ -39,12 +39,14 @@ const useCartStore = create(
       clearCart() { set({ items: [] }) },
       setOpen(open) { set({ open }) },
     }),
-    { name: 'kobber-cart' }
+    {
+      name: 'kobber-cart',
+      partialize: (s) => ({ items: s.items }),
+    }
   )
 )
 
-// Selectores derivados — usarlos en componentes
-export const selectTotal = s => s.items.reduce((acc, i) => acc + i.producto.precio * i.cantidad, 0)
+export const selectTotal = s => s.items.reduce((acc, i) => acc + (i.producto.precio || 0) * i.cantidad, 0)
 export const selectCount = s => s.items.reduce((acc, i) => acc + i.cantidad, 0)
 
 export default useCartStore

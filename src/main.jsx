@@ -2,10 +2,7 @@ import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import StorePage from './tienda/StorePage'
-import { applyRoundedFavicon } from './utils/roundedFavicon'
 import './index.css'
-
-applyRoundedFavicon()
 
 // En builds públicos (VITE_PUBLIC_ONLY=true, seteado en el deploy del servidor) la ruta /admin
 // ni se registra — import() dinámico para que Vite excluya App.jsx (Publicador) del bundle que

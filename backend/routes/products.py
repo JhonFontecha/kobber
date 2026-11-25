@@ -53,6 +53,8 @@ class VariantUpdate(BaseModel):
     stock_ml:            Optional[int]   = None
     porcentaje_kobber:   Optional[float] = None
     porcentaje_ml:       Optional[float] = None
+    # Precio de venta anterior REAL (IVA incluido). Vacío = el producto no está en oferta.
+    precio_anterior:     Optional[float] = None
     estado:              Optional[str]   = None
 
 
@@ -92,17 +94,31 @@ def _search_variants_by_codes(db, codes: list[str]):
     return product_ids, code_to_pid, no_encontrados
 
 
-_SELECT = (
-    "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
-    "nc, unidades_caja, stock, stock_ml, porcentaje_kobber, porcentaje_ml, estado), "
-    "product_images(id, url, orden, variant_id)"
-)
+_OFFERS_COL: Optional[bool] = None
+
+
+def _product_select(db) -> str:
+    """Incluye precio_anterior solo si la migración ya se aplicó."""
+    global _OFFERS_COL
+    if _OFFERS_COL is None:
+        try:
+            db.table("product_variants").select("precio_anterior").limit(1).execute()
+            _OFFERS_COL = True
+        except Exception:
+            _OFFERS_COL = False
+    offer = ", precio_anterior" if _OFFERS_COL else ""
+    return (
+        "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
+        "nc, unidades_caja, stock, stock_ml, porcentaje_kobber, porcentaje_ml"
+        f"{offer}, estado), "
+        "product_images(id, url, orden, variant_id)"
+    )
 
 
 @router.get("/by-page")
 def search_by_page(pagina: int, porcentaje: float = 30):
     db = get_client()
-    result = db.table("products").select(_SELECT).eq("pagina_catalogo", pagina).execute()
+    result = db.table("products").select(_product_select(db)).eq("pagina_catalogo", pagina).execute()
     products = result.data
 
     # Añadir porcentaje a cada variante para compatibilidad con el flujo del Publicador
@@ -128,7 +144,7 @@ def search_by_codes(body: CodesSearch):
     if not product_ids:
         return {"products": [], "no_encontrados": no_encontrados, "encontrados": 0}
 
-    result = db.table("products").select(_SELECT).in_("id", list(product_ids)).execute()
+    result = db.table("products").select(_product_select(db)).in_("id", list(product_ids)).execute()
     return {
         "products": result.data,
         "no_encontrados": no_encontrados,
@@ -189,7 +205,7 @@ async def search_from_excel(file: UploadFile = File(...)):
         return {"products": [], "porcentajes": {}, "no_encontrados": no_encontrados,
                 "total_codigos": len(code_pct), "encontrados": 0}
 
-    result = db.table("products").select(_SELECT).in_("id", list(product_ids)).execute()
+    result = db.table("products").select(_product_select(db)).in_("id", list(product_ids)).execute()
 
     porcentajes = {pid: code_pct[code] for code, pid in code_to_pid.items()
                    if code_pct.get(code) is not None}
@@ -206,11 +222,7 @@ async def search_from_excel(file: UploadFile = File(...)):
 @router.get("/search")
 def search_products(q: Optional[str] = None):
     db = get_client()
-    select_clause = (
-        "*, product_variants(id, clave, codigo, descripcion, precio_distribuidor, "
-        "nc, unidades_caja, stock, stock_ml, porcentaje_kobber, porcentaje_ml, estado), "
-        "product_images(id, url, orden, variant_id)"
-    )
+    select_clause = _product_select(db)
 
     if not q or not q.strip():
         result = db.table("products").select(select_clause).order("created_at", desc=True).execute()

@@ -17,6 +17,24 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main_public:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: KOBBER_ENV
+        value: production
+      - key: PUBLIC_SITE_URL
+        value: https://kobber-tienda.onrender.com
+      - key: KOBBER_MARGEN_DEFAULT
+        value: "30"
+      - key: KOBBER_ENVIO_COSTO
+        value: "15000"
+      - key: KOBBER_ENVIO_GRATIS_DESDE
+        value: "200000"
+      # Opcionales. Si no se definen, el login del panel en este servidor queda cerrado.
+      # La contraseña del panel vive en la Mac del Publicador; no hace falta repetirla acá.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -40,5 +58,36 @@ services:
         source: /api/*
         destination: https://kobber-store-api.onrender.com/api/*
       - type: rewrite
+        source: /sitemap.xml
+        destination: https://kobber-store-api.onrender.com/api/store/sitemap.xml
+      - type: rewrite
         source: /*
         destination: /index.html
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /favicon.png
+        name: Cache-Control
+        value: public, max-age=604800
+      - path: /apple-touch-icon.png
+        name: Cache-Control
+        value: public, max-age=604800
+      - path: /og.jpg
+        name: Cache-Control
+        value: public, max-age=604800
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.truper.com https://images.unsplash.com; connect-src 'self'; font-src 'self'; upgrade-insecure-requests"

@@ -1,10 +1,16 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import init_storage
-from routes import analyzer, catalog, excel, images, products, store
+from http_security import SecurityHeadersMiddleware
+from routes import analyzer, auth, catalog, excel, images, products, store
 
-app = FastAPI(title="Kobber API", version="0.2.0")
+_is_prod = os.getenv("KOBBER_ENV", "development") == "production"
+_docs = {"docs_url": None, "redoc_url": None, "openapi_url": None} if _is_prod else {}
+
+app = FastAPI(title="Kobber API", version="0.2.0", **_docs)
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,6 +19,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.on_event("startup")
@@ -39,3 +46,4 @@ app.include_router(excel.router,     prefix="/api/excel",     tags=["excel"])
 app.include_router(images.router,    prefix="/api/images",    tags=["images"])
 app.include_router(analyzer.router,  prefix="/api/analyzer",  tags=["analyzer"])
 app.include_router(store.router,     prefix="/api/store",     tags=["store"])
+app.include_router(auth.router,      prefix="/api/auth",      tags=["auth"])

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import splashImg from '../../assets/kobber-bn.png'
+import splashImg from '../../assets/kobber-bn.webp'
 
 export default function SplashScreen({ onComplete }) {
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
 
   useEffect(() => {
-    const t1 = setTimeout(() => setOpen(true), 1400)
-    const t2 = setTimeout(() => { setDone(true); onComplete?.() }, 2300)
+    const t1 = setTimeout(() => setOpen(true), 500)
+    const t2 = setTimeout(() => { setDone(true); onComplete?.() }, 900)
     return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [onComplete])
 

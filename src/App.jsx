@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
+import { getAdminToken } from './auth'
 import logo from './assets/logo.png'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -1244,7 +1245,7 @@ function ProductsTab({ onToast }) {
       for (const v of (draft.product_variants || [])) {
         const fields = {}
         for (const k of ['clave', 'codigo', 'descripcion', 'precio_distribuidor', 'nc', 'unidades_caja',
-                          'stock', 'stock_ml', 'porcentaje_kobber', 'porcentaje_ml', 'estado'])
+                          'stock', 'stock_ml', 'porcentaje_kobber', 'porcentaje_ml', 'precio_anterior', 'estado'])
           if (v[k] !== undefined) fields[k] = v[k]
         if (Object.keys(fields).length) await api.patch(`/api/products/variants/${v.id}`, fields)
       }
@@ -1612,6 +1613,17 @@ function ProductsTab({ onToast }) {
                                         → ${calcVenta(vDist, v.porcentaje_ml).toLocaleString()}
                                       </span>
                                     )}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }} title="Solo si ese precio se cobró de verdad. Vacío = sin oferta.">
+                                      Precio anterior:
+                                    </span>
+                                    <input
+                                      type="number" min={0}
+                                      value={v.precio_anterior ?? ''}
+                                      onChange={e => setVariantField(v.id, 'precio_anterior', e.target.value === '' ? null : Number(e.target.value))}
+                                      style={{ ...variantInputStyle, width: 90, textAlign: 'center' }}
+                                    />
                                   </div>
                                 </div>
                               </div>
@@ -2906,7 +2918,20 @@ function AnalyzeTab({ onToast }) {
 
 // ── Main App ───────────────────────────────────────────────────────────────────
 
+function useAdminGate() {
+  const [state, setState] = useState('checking')
+  useEffect(() => {
+    const token = getAdminToken()
+    if (!token) { setState('anon'); return }
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => setState(r.ok ? 'ok' : 'anon'))
+      .catch(() => setState('anon'))
+  }, [])
+  return state
+}
+
 export default function App() {
+  const auth = useAdminGate()
   const [tab, setTab] = useState('flujo')
   const [stats, setStats] = useState(null)
   const [toast, setToast] = useState(null)
@@ -2925,6 +2950,15 @@ export default function App() {
   }
 
   const onToast = (msg) => setToast(msg)
+
+  if (auth === 'checking') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+        Verificando acceso…
+      </div>
+    )
+  }
+  if (auth !== 'ok') return <Navigate to="/tienda/login" replace />
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /tienda/checkout
+Disallow: /tienda/login
+Disallow: /admin
+
+Sitemap: https://kobber-tienda.onrender.com/sitemap.xml
